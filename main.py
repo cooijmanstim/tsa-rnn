@@ -1,6 +1,7 @@
 import math
 import sys
 import operator as op
+from collections import OrderedDict
 
 import numpy as np
 import theano
@@ -23,11 +24,13 @@ from blocks.graph import ComputationGraph
 from blocks.bricks.cost import CategoricalCrossEntropy, MisclassificationRate
 from blocks.main_loop import MainLoop
 from blocks.filter import VariableFilter
+from blocks.extras.extensions.plot import Plot
 
 import masonry
 import crop
 from patchmonitor import PatchMonitoring
 
+name = "attention_rnn"
 n_epochs = 100
 batch_size = 100
 hidden_dim = 1024
@@ -83,27 +86,32 @@ step_outputs = [step_output.dimshuffle(1, 0, *range(step_output.ndim)[2:])
 yhats, hs, locations, scales, patches = step_outputs
 yhat = yhats[:, -1, :]
 
-cost = CategoricalCrossEntropy().apply(y.flatten(), yhat)
-error = MisclassificationRate().apply(y.flatten(), yhat)
+cross_entropy = CategoricalCrossEntropy().apply(y.flatten(), yhat)
+cross_entropy.name = "cross_entropy"
+error_rate = MisclassificationRate().apply(y.flatten(), yhat)
+error_rate.name = "error_rate"
 
-graph = ComputationGraph(cost)
+graph = ComputationGraph(cross_entropy)
 
 #import theano.printing
-#theano.printing.pydotprint(theano.function([x, y], cost), outfile='graph.png', format='png', scan_graphs=True)
+#theano.printing.pydotprint(theano.function([x, y], cross_entropy), outfile='graph.png', format='png', scan_graphs=True)
 #sys.exit(0)
 
 print "setting up main loop..."
-algorithm = GradientDescent(cost=cost,
+algorithm = GradientDescent(cost=cross_entropy,
                             params=graph.parameters,
                             step_rule=RMSProp(learning_rate=1e-4))
 
-monitors = [TrainingDataMonitoring([cost, error], prefix="train", after_epoch=True)]
+monitors = OrderedDict()
+monitors["train"] = TrainingDataMonitoring([cross_entropy, error_rate],
+                                           prefix="train",
+                                           after_epoch=True)
 for which in "valid test".split():
-    monitors.append(DataStreamMonitoring(
-        [cost, error],
+    monitors[which] = DataStreamMonitoring(
+        [cross_entropy, error_rate],
         data_stream=datastreams[which],
         prefix=which,
-        after_epoch=True))
+        after_epoch=True)
 
 patch_monitoring_datastream = DataStream.default_stream(
     datasets["valid"],
@@ -112,13 +120,17 @@ patch_monitoring = PatchMonitoring(patch_monitoring_datastream,
                                    theano.function([x], [locations, scales, patches]))
 patch_monitoring.save_patches("test.png")
 
-model = Model(cost)
+model = Model(cross_entropy)
 main_loop = MainLoop(data_stream=datastreams["train"],
                      algorithm=algorithm,
-                     extensions=(monitors +
+                     extensions=(list(monitors.values()) +
                                  [FinishAfter(after_n_epochs=n_epochs),
                                   ProgressBar(),
                                   Printing(),
+                                  Plot(name,
+                                       channels=[["%s_cross_entropy" % which for which in monitors.keys()],
+                                                 ["%s_error_rate"    % which for which in monitors.keys()]],
+                                       after_epoch=True),
                                   patch_monitoring]),
                      model=model)
 print "training..."
