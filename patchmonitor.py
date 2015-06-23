@@ -73,9 +73,10 @@ class PatchMonitoring(SimpleExtension):
                                                                 facecolor="none"))
 
         fig = plt.gcf()
-        fig.set_size_inches(fig.get_size_inches() * 4)
+        fig.set_size_inches((16, 9))
         plt.tight_layout()
         fig.savefig(filename, bbox_inches="tight", facecolor="gray")
+        plt.close()
 
     def imshow(self, image, *args, **kwargs):
         kwargs.setdefault("cmap", "gray")
