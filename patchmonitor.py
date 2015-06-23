@@ -62,13 +62,13 @@ class PatchMonitoring(SimpleExtension):
             for j, (patch, location, scale) in enumerate(zip(patches, locations, scales)):
                 patch_ax = plt.subplot(inner_grid[0, j])
                 self.imshow(patch, axes=patch_ax)
-                patch_ax.set_title("l (%3.2f, %3.2f)s (%3.2f, %3.2f)" % (location[0], location[1], scale[0], scale[1]))
+                patch_ax.set_title("l (%3.2f, %3.2f)\ns (%3.2f, %3.2f)" % (location[0], location[1], scale[0], scale[1]))
                 patch_ax.axis("off")
 
-                patch_hw = patch_shape * scale
-                image_location = (location + 1)/2 * image_shape
-                image_ax.add_patch(matplotlib.patches.Rectangle(image_location - patch_hw / 2.0,
-                                                                patch_hw[0], patch_hw[1],
+                patch_hw = patch_shape / scale
+                image_yx = (location + 1)/2 * image_shape - patch_hw/2.0
+                image_ax.add_patch(matplotlib.patches.Rectangle((image_yx[1], image_yx[0]),
+                                                                patch_hw[1], patch_hw[0],
                                                                 edgecolor="red",
                                                                 facecolor="none"))
 
