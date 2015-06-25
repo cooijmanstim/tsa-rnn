@@ -62,6 +62,10 @@ x = T.tensor4('features', dtype=floatX)
 # shape (batch_size, ntargets)
 y = T.lmatrix('targets')
 
+theano.config.compute_test_value = 'warn'
+x.tag.test_value = np.random.random((batch_size, 1, 28, 28)).astype("float32")
+y.tag.test_value = np.random.random_integers(0, 9, (batch_size, 1)).astype("int64")
+
 locator = masonry.Locator(hidden_dim, area_dim, n_spatial_dims)
 cropper = crop.LocallySoftRectangularCropper(n_spatial_dims, x.shape[-n_spatial_dims:], patch_shape, crop.gaussian)
 merger = masonry.Merger(patch_shape, area_dim, hidden_dim,
