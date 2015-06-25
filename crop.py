@@ -8,12 +8,13 @@ from blocks.bricks import Softmax, Rectifier, Brick, application, MLP
 import util
 
 class LocallySoftRectangularCropper(Brick):
-    def __init__(self, n_spatial_dims, image_shape, patch_shape, kernel, **kwargs):
+    def __init__(self, n_spatial_dims, image_shape, patch_shape, kernel, batched_window=False, **kwargs):
         super(LocallySoftRectangularCropper, self).__init__(**kwargs)
         self.image_shape = T.cast(image_shape, 'int16')
         self.patch_shape = patch_shape
         self.kernel = kernel
         self.n_spatial_dims = n_spatial_dims
+        self.batched_window = batched_window
 
     def true_location(self, location, axis=None):
         # linearly map locations from (-1, 1) to image index space
@@ -62,6 +63,14 @@ class LocallySoftRectangularCropper(Brick):
         a -= 3 / scale
         b += 3 / scale
 
+        if self.batched_window:
+            # take the bounding box of all windows; now the slices
+            # will have the same length for each sample and scan can
+            # be avoided.  comes at the cost of typically selecting
+            # more of the input.
+            a = a.min(axis=0)
+            b = b.max(axis=0)
+
         # make integer
         a = T.cast(T.floor(a), 'int16')
         b = T.cast(T.ceil(b), 'int16')
@@ -76,32 +85,35 @@ class LocallySoftRectangularCropper(Brick):
     def apply(self, image, location, scale):
         a, b = self.compute_hard_windows(location, scale)
 
-        def map_fn(image, a, b, location, scale):
-            slices = [theano.gradient.disconnected_grad(T.arange(a[i], b[i]))
-                      for i in xrange(self.n_spatial_dims)]
+        if self.batched_window:
+            patch = self.apply_inner(image, location, scale, a, b)
+        else:
+            def map_fn(image, a, b, location, scale):
+                # apply_inner expects a batch axis
+                image = T.shape_padleft(image)
+                location = T.shape_padleft(location)
+                scale = T.shape_padleft(scale)
 
-            hardcrop = util.subtensor(
-                image,
-                [(T.arange(image.shape[0]), 0)]
-                + [(slice, 1 + i) for i, slice in enumerate(slices)])
+                patch = self.apply_inner(image, location, scale, a, b)
 
-            # apply_inner expects a batch axis
-            hardcrop = T.shape_padleft(hardcrop)
-            location = T.shape_padleft(location)
-            scale = T.shape_padleft(scale)
+                # return without batch axis
+                return patch[0]
 
-            patch = self.apply_inner(hardcrop, location, scale, slices)
+            patch, _ = theano.map(map_fn,
+                                  sequences=[image, a, b, location, scale])
 
-            # return without batch axis
-            return patch[0]
-
-        patch, _ = theano.map(map_fn,
-                              sequences=[image, a, b, location, scale])
         return patch
 
-    def apply_inner(self, image, location, scale, slices):
+    def apply_inner(self, image, location, scale, a, b):
+        slices = [theano.gradient.disconnected_grad(T.arange(a[i], b[i]))
+                  for i in xrange(self.n_spatial_dims)]
+        hardcrop = util.subtensor(
+            image,
+            [(T.arange(image.shape[0]), 0),
+             (T.arange(image.shape[1]), 1)]
+             + [(slice, 2 + i) for i, slice in enumerate(slices)])
         matrices = self.compute_crop_matrices(location, scale, slices)
-        patch = image
+        patch = hardcrop
         for axis, matrix in enumerate(matrices):
             patch = T.batched_tensordot(patch, matrix, [[2], [1]])
         return patch
