@@ -63,7 +63,7 @@ x = T.tensor4('features', dtype=floatX)
 y = T.lmatrix('targets')
 
 locator = masonry.Locator(hidden_dim, area_dim, n_spatial_dims)
-cropper = crop.RectangularCropper(n_spatial_dims, x.shape[-n_spatial_dims:], patch_shape, crop.gaussian)
+cropper = crop.LocallySoftRectangularCropper(n_spatial_dims, x.shape[-n_spatial_dims:], patch_shape, crop.gaussian)
 merger = masonry.Merger(patch_shape, area_dim, hidden_dim,
                         area_posttransform=Rectifier(),
                         response_posttransform=Rectifier(),

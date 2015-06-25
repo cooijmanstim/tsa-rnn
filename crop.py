@@ -1,12 +1,114 @@
 import math
 
+import theano
 import theano.tensor as T
 
 from blocks.bricks import Softmax, Rectifier, Brick, application, MLP
 
-class RectangularCropper(Brick):
+import util
+
+class LocallySoftRectangularCropper(Brick):
     def __init__(self, n_spatial_dims, image_shape, patch_shape, kernel, **kwargs):
-        super(RectangularCropper, self).__init__(**kwargs)
+        super(LocallySoftRectangularCropper, self).__init__(**kwargs)
+        self.image_shape = T.cast(image_shape, 'int16')
+        self.patch_shape = patch_shape
+        self.kernel = kernel
+        self.n_spatial_dims = n_spatial_dims
+
+    def true_location(self, location, axis=None):
+        # linearly map locations from (-1, 1) to image index space
+        image_dim = self.image_shape
+        if axis is not None:
+            image_dim = image_dim[axis]
+        return (location + 1) / 2 * image_dim
+
+    def compute_crop_matrices(self, locations, scales, Is):
+        Ws = []
+        for axis in xrange(self.n_spatial_dims):
+            m = T.cast(self.image_shape[axis], 'float32')
+            n = T.cast(self.patch_shape[axis], 'float32')
+            I = Is[axis].dimshuffle('x', 0, 'x')    # (1, hardcrop_dim, 1)
+            J = T.arange(n).dimshuffle('x', 'x', 0) # (1, 1, patch_dim)
+
+            location = locations[:, axis].dimshuffle(0, 'x', 'x')   # (batch_size, 1, 1)
+            scale    = scales   [:, axis].dimshuffle(0, 'x', 'x')   # (batch_size, 1, 1)
+
+            location = self.true_location(location, axis)
+
+            # map patch index into image index space
+            J = (J - 0.5*n) / scale + location                      # (batch_size, 1, patch_dim)
+
+            # compute squared distances between image index and patch
+            # index in the current dimension:
+            #   dx**2 = (i - j)*(i - j)
+            #               where i is image index
+            #                     j is patch index mapped into image space
+            #         = i**2 + j**2 -2ij
+            #         = I**2 + J**2 -2IJ'  for all i,j in one swoop
+
+            IJ = I * J                # (batch_size, hardcrop_dim, patch_dim)
+            dx2 = I**2 + J**2 - 2*IJ  # (batch_size, hardcrop_dim, patch_dim)
+
+            Ws.append(self.kernel(dx2, scale))
+        return Ws
+
+    def compute_hard_windows(self, location, scale):
+        # find topleft(front) and bottomright(back) corners for each patch
+        a = self.true_location(location) - 0.5 * (self.patch_shape / scale)
+        b = self.true_location(location) + 0.5 * (self.patch_shape / scale)
+
+        # grow by three patch pixels
+        # TODO: choose expansion to capture a given proportion of kernel volume (e.g. 2 sigma)
+        a -= 3 / scale
+        b += 3 / scale
+
+        # make integer
+        a = T.cast(T.floor(a), 'int16')
+        b = T.cast(T.ceil(b), 'int16')
+
+        # clip to fit inside image
+        a = T.clip(a, 0, self.image_shape)
+        b = T.clip(b, 0, self.image_shape)
+
+        return a, b
+
+    @application(inputs=['image', 'location', 'scale'], outputs=['patch'])
+    def apply(self, image, location, scale):
+        a, b = self.compute_hard_windows(location, scale)
+
+        def map_fn(image, a, b, location, scale):
+            slices = [theano.gradient.disconnected_grad(T.arange(a[i], b[i]))
+                      for i in xrange(self.n_spatial_dims)]
+
+            hardcrop = util.subtensor(
+                image,
+                [(T.arange(image.shape[0]), 0)]
+                + [(slice, 1 + i) for i, slice in enumerate(slices)])
+
+            # apply_inner expects a batch axis
+            hardcrop = T.shape_padleft(hardcrop)
+            location = T.shape_padleft(location)
+            scale = T.shape_padleft(scale)
+
+            patch = self.apply_inner(hardcrop, location, scale, slices)
+
+            # return without batch axis
+            return patch[0]
+
+        patch, _ = theano.map(map_fn,
+                              sequences=[image, a, b, location, scale])
+        return patch
+
+    def apply_inner(self, image, location, scale, slices):
+        matrices = self.compute_crop_matrices(location, scale, slices)
+        patch = image
+        for axis, matrix in enumerate(matrices):
+            patch = T.batched_tensordot(patch, matrix, [[2], [1]])
+        return patch
+
+class SoftRectangularCropper(Brick):
+    def __init__(self, n_spatial_dims, image_shape, patch_shape, kernel, **kwargs):
+        super(SoftRectangularCropper, self).__init__(**kwargs)
         self.patch_shape = patch_shape
         self.image_shape = image_shape
         self.kernel = kernel
