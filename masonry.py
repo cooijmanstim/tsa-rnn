@@ -1,27 +1,23 @@
-import operator
-
 import theano.tensor as T
 
 from blocks.bricks.base import lazy, application, Brick
 from blocks.bricks.parallel import Fork, Merge
 from blocks.bricks.recurrent import BaseRecurrent, recurrent
-from blocks.bricks import Linear, Tanh, Rectifier, Initializable, MLP
+from blocks.bricks import Linear, Tanh, Rectifier, Initializable, MLP, Sequence, FeedforwardSequence
 from blocks.bricks.conv import Flattener
 from blocks.initialization import Constant, IsotropicGaussian
 
 from util import NormalizedInitialization
 
 class Merger(Initializable):
-    def __init__(self, patch_shape, area_dim, response_dim,
+    def __init__(self, n_spatial_dims, patch_postdim, area_dim, response_dim,
+                 patch_posttransform=None,
                  area_pretransform=None, response_pretransform=None,
                  area_posttransform=None, response_posttransform=None,
                  **kwargs):
         super(Merger, self).__init__(**kwargs)
 
-        n_spatial_dims = len(patch_shape)
-        patch_dim = reduce(operator.mul, patch_shape)
-
-        self.patch_flattener = Flattener()
+        self.patch_posttransform = FeedforwardSequence([patch_posttransform, Flattener().apply])
 
         self.area = Merge(input_names="location scale".split(),
                           input_dims=[n_spatial_dims, n_spatial_dims],
@@ -31,22 +27,23 @@ class Merger(Initializable):
         self.area_posttransform = area_posttransform
 
         self.response = Merge(input_names="area patch".split(),
-                              input_dims=[self.area.output_dim, patch_dim],
+                              input_dims=[self.area.output_dim,
+                                          patch_postdim],
                               output_dim=response_dim,
                               prototype=response_pretransform)
         self.response.children[0].use_bias = True
         self.response_posttransform = response_posttransform
 
-        self.children = [self.area, self.response, self.patch_flattener,
+        self.children = [self.area, self.response, self.patch_posttransform,
                          self.area_posttransform, self.response_posttransform]
 
     @application(inputs="patch location scale".split(),
                  outputs=['response'])
     def apply(self, patch, location, scale):
-        flatpatch = self.patch_flattener.apply(patch)
+        patch = self.patch_posttransform.apply(patch)
         area = self.area.apply(location, scale)
         area = self.area_posttransform.apply(area)
-        response = self.response.apply(area, flatpatch)
+        response = self.response.apply(area, patch)
         response = self.response_posttransform.apply(response)
         return response
 

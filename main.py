@@ -26,6 +26,7 @@ from blocks.bricks.cost import CategoricalCrossEntropy, MisclassificationRate
 from blocks.main_loop import MainLoop
 from blocks.filter import VariableFilter
 from blocks.extras.extensions.plot import Plot
+from blocks.bricks.conv import ConvolutionalSequence, ConvolutionalLayer
 
 import masonry
 import crop
@@ -42,6 +43,7 @@ n_spatial_dims = len(patch_shape)
 patch_dim = reduce(op.mul, patch_shape)
 area_dim = 128
 n_classes = 10
+n_channels = 1
 
 initargs = dict(weights_init=Orthogonal(),
                 biases_init=Constant(0))
@@ -65,15 +67,33 @@ x = T.tensor4('features', dtype=floatX)
 y = T.lmatrix('targets')
 
 theano.config.compute_test_value = 'warn'
-x.tag.test_value = np.random.random((batch_size, 1, 28, 28)).astype("float32")
+x.tag.test_value = np.random.random((batch_size, n_channels, 28, 28)).astype("float32")
 y.tag.test_value = np.random.random_integers(0, 9, (batch_size, 1)).astype("int64")
+
+patch_transform = ConvolutionalSequence(
+    layers=[ConvolutionalLayer(activation=Rectifier().apply,
+                               filter_size=(8, 8),
+                               pooling_size=(2, 2),
+                               num_filters=patch_dim*(i+1),
+                               name="patch_conv_%i" % i)
+            for i in xrange(2)],
+    num_channels=n_channels,
+    image_size=patch_shape,
+    weights_init=IsotropicGaussian(std=1e-8),
+    biases_init=Constant(0))
+patch_transform.push_allocation_config()
+# ConvolutionalSequence doesn't provide output_dim
+patch_postdim = reduce(op.mul, patch_transform.get_dim("output"))
 
 locator = masonry.Locator(hidden_dim, area_dim, n_spatial_dims)
 cropper = crop.LocallySoftRectangularCropper(
     n_spatial_dims, x.shape[-n_spatial_dims:], patch_shape,
     crop.gaussian,
     batched_window=True)
-merger = masonry.Merger(patch_shape, area_dim, hidden_dim,
+merger = masonry.Merger(n_spatial_dims,
+                        patch_postdim,
+                        area_dim, hidden_dim,
+                        patch_posttransform=patch_transform.apply,
                         area_posttransform=Rectifier(),
                         response_posttransform=Rectifier(),
                         **initargs)
