@@ -41,6 +41,7 @@ patch_shape = (8, 8)
 n_spatial_dims = len(patch_shape)
 patch_dim = reduce(op.mul, patch_shape)
 area_dim = 512
+n_classes = 10
 
 initargs = dict(weights_init=Orthogonal(),
                 biases_init=Constant(0))
@@ -57,7 +58,6 @@ datastreams = dict(
         dataset,
         iteration_scheme=ShuffledScheme(dataset.num_examples, batch_size)))
     for which, dataset in datasets.items())
-n_classes = 10
 
 # shape (batch, channel, height, width)
 x = T.tensor4('features', dtype=floatX)
