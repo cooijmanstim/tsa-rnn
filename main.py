@@ -8,7 +8,7 @@ import theano
 import theano.tensor as T
 
 from fuel.datasets import MNIST
-from fuel.schemes import ShuffledScheme
+from fuel.schemes import ShuffledScheme, SequentialScheme
 from fuel.streams import DataStream
 
 from blocks.initialization import IsotropicGaussian, Constant, NdarrayInitialization, Orthogonal
@@ -126,7 +126,7 @@ for which in "valid test".split():
 
 patch_monitoring_datastream = DataStream.default_stream(
     datasets["valid"],
-    iteration_scheme=ShuffledScheme(5, 5))
+    iteration_scheme=SequentialScheme(5, 5))
 patch_monitoring = PatchMonitoring(patch_monitoring_datastream,
                                    theano.function([x], [locations, scales, patches]))
 patch_monitoring.save_patches("test.png")
