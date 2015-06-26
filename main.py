@@ -35,12 +35,12 @@ from patchmonitor import PatchMonitoring
 name = "attention_rnn"
 n_epochs = 100
 batch_size = 100
-hidden_dim = 1024
+hidden_dim = 256
 n_steps = 8
-patch_shape = (8, 8)
+patch_shape = (16, 16)
 n_spatial_dims = len(patch_shape)
 patch_dim = reduce(op.mul, patch_shape)
-area_dim = 512
+area_dim = 128
 n_classes = 10
 
 initargs = dict(weights_init=Orthogonal(),
