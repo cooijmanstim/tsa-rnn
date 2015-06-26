@@ -3,6 +3,8 @@ import math
 import theano
 import theano.tensor as T
 
+floatX = theano.config.floatX
+
 from blocks.bricks import Softmax, Rectifier, Brick, application, MLP
 
 import util
@@ -19,9 +21,9 @@ class LocallySoftRectangularCropper(Brick):
     @application(inputs=['x'], outputs=['location0', 'scale0'])
     def compute_initial_location_scale(self, x):
         # let patch cover entire image
-        location = T.alloc(T.cast(0.0, theano.config.floatX),
+        location = T.alloc(T.cast(0.0, floatX),
                            x.shape[0], self.n_spatial_dims)
-        scale = T.constant(self.patch_shape) / (2*self.true_location(location))
+        scale = T.cast(self.patch_shape, floatX) / (2*self.true_location(location))
         return location, scale
 
     def true_location(self, location, axis=None):
