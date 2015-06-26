@@ -16,6 +16,14 @@ class LocallySoftRectangularCropper(Brick):
         self.n_spatial_dims = n_spatial_dims
         self.batched_window = batched_window
 
+    @application(inputs=['x'], outputs=['location0', 'scale0'])
+    def compute_initial_location_scale(self, x):
+        # let patch cover entire image
+        location = T.alloc(T.cast(0.0, theano.config.floatX),
+                           x.shape[0], self.n_spatial_dims)
+        scale = T.constant(self.patch_shape) / (2*self.true_location(location))
+        return location, scale
+
     def true_location(self, location, axis=None):
         # linearly map locations from (-1, 1) to image index space
         image_dim = self.image_shape

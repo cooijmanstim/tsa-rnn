@@ -86,7 +86,11 @@ model = masonry.RecurrentAttentionModel(rnn, attention, emitter,
 
 model.initialize()
 
-step_outputs = model.apply(x, n_steps=n_steps, batch_size=x.shape[0])
+initial_outputs = model.compute_initial_state(x)
+step_outputs = model.apply(x=x, h=initial_outputs[1], n_steps=n_steps, batch_size=x.shape[0])
+# prepend initial values
+step_outputs = [T.concatenate([T.shape_padleft(initial_output), step_output], axis=0)
+                for initial_output, step_output in zip(initial_outputs, step_outputs)]
 # move batch axis in front of RNN time axis
 step_outputs = [step_output.dimshuffle(1, 0, *range(step_output.ndim)[2:])
                 for step_output in step_outputs]

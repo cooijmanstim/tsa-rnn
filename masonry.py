@@ -77,8 +77,18 @@ class SpatialAttention(Initializable):
     @application(inputs=['x', 'h'], outputs=['u', 'location', 'scale', 'patch'])
     def apply(self, x, h):
         location, scale = self.locator.apply(h)
+        u, patch = self.crop_and_merge(x, location, scale)
+        return u, location, scale, patch
+
+    def crop_and_merge(self, x, location, scale):
         patch = self.cropper.apply(x, location, scale)
         u = self.merger.apply(patch, location, scale)
+        return u, patch
+
+    @application(inputs=['x'], outputs="u0 location0 scale0 patch0".split())
+    def compute_initial_input(self, x):
+        location, scale = self.cropper.compute_initial_location_scale(x)
+        u, patch = self.crop_and_merge(x, location, scale)
         return u, location, scale, patch
 
 class RecurrentAttentionModel(BaseRecurrent, Initializable):
@@ -97,9 +107,17 @@ class RecurrentAttentionModel(BaseRecurrent, Initializable):
         except KeyError:
             return super(RecurrentAttentionModel, self).get_dim(name)
 
-    @recurrent(sequences=[''], contexts=['x'], states=['h'], outputs=['y', 'h', 'location', 'scale', 'patch'])
+    @recurrent(sequences=[''], contexts=['x'], states=['h'], outputs=['yhat', 'h', 'location', 'scale', 'patch'])
     def apply(self, x, h):
         u, location, scale, patch = self.attention.apply(x, h)
         h = self.rnn.apply(states=h, inputs=u, iterate=False)
-        y = self.emitter.apply(h)
-        return y, h, location, scale, patch
+        yhat = self.emitter.apply(h)
+        return yhat, h, location, scale, patch
+
+    @application(inputs=['x'], outputs=['yhat0', 'h0', 'location0', 'scale0', 'patch0'])
+    def compute_initial_state(self, x):
+        u, location, scale, patch = self.attention.compute_initial_input(x)
+        h = self.rnn.apply(states=self.rnn.initial_states(state_name="states", batch_size=x.shape[0]),
+                           inputs=u, iterate=False)
+        yhat = self.emitter.apply(h)
+        return yhat, h, location, scale, patch
