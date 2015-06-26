@@ -36,7 +36,7 @@ name = "attention_rnn"
 n_epochs = 100
 batch_size = 100
 hidden_dim = 256
-n_steps = 8
+n_patches = 4
 patch_shape = (16, 16)
 n_spatial_dims = len(patch_shape)
 patch_dim = reduce(op.mul, patch_shape)
@@ -91,7 +91,7 @@ model = masonry.RecurrentAttentionModel(rnn, attention, emitter,
 model.initialize()
 
 initial_outputs = model.compute_initial_state(x)
-step_outputs = model.apply(x=x, h=initial_outputs[1], n_steps=n_steps, batch_size=x.shape[0])
+step_outputs = model.apply(x=x, h=initial_outputs[1], n_steps=n_patches - 1, batch_size=x.shape[0])
 # prepend initial values
 step_outputs = [T.concatenate([T.shape_padleft(initial_output), step_output], axis=0)
                 for initial_output, step_output in zip(initial_outputs, step_outputs)]
@@ -120,7 +120,7 @@ algorithm = GradientDescent(cost=cross_entropy,
 channels = util.Channels()
 channels.add(cross_entropy)
 channels.add(error_rate)
-for i in xrange(n_steps):
+for i in xrange(n_patches):
     channels.add(hs[:, i].max(), "h%i_max" % i)
 #for activation in VariableFilter(roles=[OUTPUT])(graph.variables):
 #    quantity = activation.mean()
