@@ -19,14 +19,14 @@ from blocks.extensions.monitoring import TrainingDataMonitoring, DataStreamMonit
 from blocks.main_loop import MainLoop
 from blocks.extensions import FinishAfter, Printing, ProgressBar
 from blocks.roles import PARAMETER, OUTPUT, INPUT, DROPOUT
-from blocks.bricks import Softmax, Rectifier, Brick, application, MLP
+from blocks.bricks import Softmax, Rectifier, Brick, application, MLP, FeedforwardSequence
 from blocks.bricks.recurrent import LSTM, SimpleRecurrent
 from blocks.graph import ComputationGraph
 from blocks.bricks.cost import CategoricalCrossEntropy, MisclassificationRate
 from blocks.main_loop import MainLoop
 from blocks.filter import VariableFilter
 from blocks.extras.extensions.plot import Plot
-from blocks.bricks.conv import ConvolutionalSequence, ConvolutionalLayer
+from blocks.bricks.conv import ConvolutionalSequence, ConvolutionalLayer, Flattener
 
 import masonry
 import crop
@@ -38,12 +38,14 @@ n_epochs = 100
 batch_size = 100
 hidden_dim = 256
 n_patches = 4
-patch_shape = (16, 16)
+patch_shape = (8, 8)
 n_spatial_dims = len(patch_shape)
 patch_dim = reduce(op.mul, patch_shape)
 area_dim = 128
 n_classes = 10
 n_channels = 1
+# whether patch should go through a convnet or an fcnet
+convolutional = False
 
 initargs = dict(weights_init=Orthogonal(),
                 biases_init=Constant(0))
@@ -70,20 +72,27 @@ theano.config.compute_test_value = 'warn'
 x.tag.test_value = np.random.random((batch_size, n_channels, 28, 28)).astype("float32")
 y.tag.test_value = np.random.random_integers(0, 9, (batch_size, 1)).astype("int64")
 
-patch_transform = ConvolutionalSequence(
-    layers=[ConvolutionalLayer(activation=Rectifier().apply,
-                               filter_size=(8, 8),
-                               pooling_size=(2, 2),
-                               num_filters=patch_dim*(i+1),
-                               name="patch_conv_%i" % i)
-            for i in xrange(2)],
-    num_channels=n_channels,
-    image_size=patch_shape,
-    weights_init=IsotropicGaussian(std=1e-8),
-    biases_init=Constant(0))
-patch_transform.push_allocation_config()
-# ConvolutionalSequence doesn't provide output_dim
-patch_postdim = reduce(op.mul, patch_transform.get_dim("output"))
+if convolutional:
+    patch_transform = ConvolutionalSequence(
+        layers=[ConvolutionalLayer(activation=Rectifier().apply,
+                                filter_size=(3, 3),
+                                pooling_size=(2, 2),
+                                num_filters=patch_dim*(i+1),
+                                name="patch_conv_%i" % i)
+                for i in xrange(2)],
+        num_channels=n_channels,
+        image_size=patch_shape,
+        weights_init=IsotropicGaussian(std=1e-8),
+        biases_init=Constant(0))
+    patch_transform.push_allocation_config()
+    # ConvolutionalSequence doesn't provide output_dim
+    patch_postdim = reduce(op.mul, patch_transform.get_dim("output"))
+else:
+    patch_postdim = 128
+    patch_transform = FeedforwardSequence([Flattener().apply,
+                                           MLP(activations=[Rectifier()],
+                                               dims=[patch_dim, patch_postdim],
+                                               **initargs).apply])
 
 locator = masonry.Locator(hidden_dim, area_dim, n_spatial_dims)
 cropper = crop.LocallySoftRectangularCropper(
