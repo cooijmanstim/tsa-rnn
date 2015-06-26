@@ -18,6 +18,7 @@ from blocks.algorithms import GradientDescent, RMSProp
 from blocks.extensions.monitoring import TrainingDataMonitoring, DataStreamMonitoring
 from blocks.main_loop import MainLoop
 from blocks.extensions import FinishAfter, Printing, ProgressBar
+from blocks.roles import PARAMETER, OUTPUT, INPUT, DROPOUT
 from blocks.bricks import Softmax, Rectifier, Brick, application, MLP
 from blocks.bricks.recurrent import LSTM, SimpleRecurrent
 from blocks.graph import ComputationGraph
@@ -28,6 +29,7 @@ from blocks.extras.extensions.plot import Plot
 
 import masonry
 import crop
+import util
 from patchmonitor import PatchMonitoring
 
 name = "attention_rnn"
@@ -113,13 +115,23 @@ algorithm = GradientDescent(cost=cross_entropy,
                             params=graph.parameters,
                             step_rule=RMSProp(learning_rate=1e-4))
 
+channels = util.Channels()
+channels.add(cross_entropy)
+channels.add(error_rate)
+for i in xrange(n_steps):
+    channels.add(hs[:, i].max(), "h%i_max" % i)
+#for activation in VariableFilter(roles=[OUTPUT])(graph.variables):
+#    quantity = activation.mean()
+#    quantity.name = "%s_mean" % activation.name
+#    channels.add(quantity)
+
 monitors = OrderedDict()
-monitors["train"] = TrainingDataMonitoring([cross_entropy, error_rate],
+monitors["train"] = TrainingDataMonitoring(channels.get_channels(),
                                            prefix="train",
                                            after_epoch=True)
 for which in "valid test".split():
     monitors[which] = DataStreamMonitoring(
-        [cross_entropy, error_rate],
+        channels.get_channels(),
         data_stream=datastreams[which],
         prefix=which,
         after_epoch=True)

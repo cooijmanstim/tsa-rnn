@@ -1,6 +1,9 @@
 import itertools as it
 import numbers
 from theano.compile import ViewOp
+from collections import OrderedDict
+from blocks.utils import named_copy
+from blocks.initialization import NdarrayInitialization
 
 import theano.tensor as T
 
@@ -37,4 +40,27 @@ class WithDifferentiableApproximation(ViewOp):
 
 def with_differentiable_approximation(fprop_output, bprop_output):
     return WithDifferentiableApproximation()(fprop_output, bprop_output)
+
+# to handle non-unique monitoring channels without crashing and
+# without silent loss of information
+class Channels(object):
+    def __init__(self):
+        self.dikt = OrderedDict()
+
+    def add(self, quantity, name=None):
+        if name is not None:
+            quantity = named_copy(quantity, name)
+        self.dikt.setdefault(quantity.name, []).append(quantity)
+
+    def get_channels(self):
+        channels = []
+        for _, quantities in self.dikt.items():
+            if len(quantities) == 1:
+                channels.append(quantities[0])
+            else:
+                # name not unique; uniquefy
+                for i, quantity in enumerate(quantities):
+                    channels.append(named_copy(
+                        quantity, "[%i]%s" % (i, quantity.name)))
+        return channels
 
