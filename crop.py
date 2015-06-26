@@ -75,9 +75,9 @@ class LocallySoftRectangularCropper(Brick):
         a = T.cast(T.floor(a), 'int16')
         b = T.cast(T.ceil(b), 'int16')
 
-        # clip to fit inside image
-        a = T.clip(a, 0, self.image_shape)
-        b = T.clip(b, 0, self.image_shape)
+        # clip to fit inside image and have nonempty window
+        a = T.clip(a, 0, self.image_shape - 1)
+        b = T.clip(b, a + 1, self.image_shape)
 
         return a, b
 
