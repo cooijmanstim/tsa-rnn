@@ -7,6 +7,9 @@ from blocks.bricks.parallel import Fork, Merge
 from blocks.bricks.recurrent import BaseRecurrent, recurrent
 from blocks.bricks import Linear, Tanh, Rectifier, Initializable, MLP
 from blocks.bricks.conv import Flattener
+from blocks.initialization import Constant, IsotropicGaussian
+
+from util import NormalizedInitialization
 
 class Merger(Initializable):
     def __init__(self, patch_shape, area_dim, response_dim,
@@ -52,9 +55,15 @@ class Locator(Initializable):
         super(Locator, self).__init__(**kwargs)
 
         self.area = MLP(activations=[area_posttransform], dims=[input_dim, area_dim])
+
+        # these are huge reductions in dimensionality, so use
+        # normalized initialization to avoid huge values.
+        prototype = Linear(weights_init=NormalizedInitialization(IsotropicGaussian(std=1e-3)),
+                           biases_init=Constant(0))
         self.fork = Fork(output_names=['raw_location', 'raw_scale'],
                          input_dim=self.area.output_dim,
-                         output_dims=[n_spatial_dims, n_spatial_dims])
+                         output_dims=[n_spatial_dims, n_spatial_dims],
+                         prototype=prototype)
 
         self.children = [self.area, self.fork]
 

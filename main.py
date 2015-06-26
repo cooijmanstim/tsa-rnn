@@ -11,7 +11,7 @@ from fuel.datasets import MNIST
 from fuel.schemes import ShuffledScheme, SequentialScheme
 from fuel.streams import DataStream
 
-from blocks.initialization import IsotropicGaussian, Constant, NdarrayInitialization, Orthogonal
+from blocks.initialization import IsotropicGaussian, Constant, NdarrayInitialization, Orthogonal, Identity
 from blocks.utils import named_copy
 from blocks.model import Model
 from blocks.algorithms import GradientDescent, RMSProp
@@ -82,7 +82,9 @@ emitter = MLP(activations=[Softmax()],
               dims=[hidden_dim, n_classes],
               **initargs)
 rnn = SimpleRecurrent(activation=Rectifier(),
-                      dim=hidden_dim, **initargs)
+                      dim=hidden_dim,
+                      weights_init=Identity(),
+                      biases_init=initargs["biases_init"])
 model = masonry.RecurrentAttentionModel(rnn, attention, emitter,
                                         **initargs)
 
