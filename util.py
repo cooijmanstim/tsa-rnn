@@ -76,3 +76,12 @@ class NormalizedInitialization(NdarrayInitialization):
         x /= abs(x).sum(axis=self.axis, keepdims=True)
         return x
 
+def dict_merge(*dikts):
+    result = OrderedDict()
+    for dikt in dikts:
+        result.update(dikt)
+    return result
+
+def named(x, name):
+    x.name = name
+    return x
