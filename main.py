@@ -181,12 +181,24 @@ def construct_main_loop(name, convolutional, patch_shape, batch_size,
     return main_loop
 
 if __name__ == "__main__":
-    with open(os.path.join(os.path.dirname(__file__), "defaults.yaml")) as f:
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--hyperparameters", help="YAML file from which to load hyperparameters")
+
+    args = parser.parse_args()
+    
+    with open(os.path.join(os.path.dirname(__file__), "defaults.yaml"), "rb") as f:
         hyperparameters = yaml.load(f)
+    if args.hyperparameters:
+        with open(args.hyperparameters, "rb") as f:
+            hyperparameters.update(yaml.load(f))
+
     hyperparameters["n_spatial_dims"] = len(hyperparameters["patch_shape"])
     hyperparameters["initargs"] = dict(weights_init=Orthogonal(),
                                        biases_init=Constant(0))
     hyperparameters["hyperparameters"] = hyperparameters
+
     main_loop = construct_main_loop(**hyperparameters)
     print "training..."
     main_loop.run()
