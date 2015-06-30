@@ -35,13 +35,14 @@ import crop
 import util
 from patchmonitor import PatchMonitoring
 import mnist
+import svhn
 
 floatX = theano.config.floatX
 
 class Ram(object):
     def __init__(self, image_shape, patch_shape, patch_transform,
                  patch_postdim, hidden_dim, area_dim, n_spatial_dims,
-                 batched_window, n_classes, initargs, **kwargs):
+                 batched_window, initargs, emitter, **kwargs):
         self.locator = masonry.Locator(hidden_dim, area_dim, n_spatial_dims)
         self.cropper = crop.LocallySoftRectangularCropper(
             n_spatial_dims, image_shape, patch_shape,
@@ -54,16 +55,13 @@ class Ram(object):
             response_posttransform=Rectifier(),
             **initargs)
         self.attention = masonry.SpatialAttention(self.locator, self.cropper, self.merger)
-        self.emitter = MLP(activations=[Softmax()],
-                           dims=[hidden_dim, n_classes],
-                           **initargs)
+        self.emitter = emitter
         self.rnn = SimpleRecurrent(activation=Rectifier(),
                                    dim=hidden_dim,
                                    weights_init=Identity(),
                                    biases_init=Constant(0))
         self.model = masonry.RecurrentAttentionModel(
-            self.rnn, self.attention, self.emitter,
-            **initargs)
+            self.rnn, self.attention, self.emitter, **initargs)
 
     def initialize(self):
         self.model.initialize()
@@ -77,11 +75,16 @@ class Ram(object):
         # move batch axis in front of RNN time axis
         step_outputs = [step_output.dimshuffle(1, 0, *range(step_output.ndim)[2:])
                         for step_output in step_outputs]
-        yhats, hs, locations, scales, patches = step_outputs
         return step_outputs
 
-def construct_model(convolutional, patch_shape, initargs, hyperparameters, **kwargs):
-    patch_dim = reduce(op.mul, patch_shape)
+def get_task(task_name, hyperparameters, **kwargs):
+    klass = dict(mnist=mnist.Task,
+                 svhn_digit=svhn.DigitTask)[task_name]
+    return klass(**hyperparameters)
+
+def construct_model(task, convolutional, patch_shape, initargs,
+                    n_channels, hyperparameters, **kwargs):
+    patch_dim = n_channels * reduce(op.mul, patch_shape)
 
     if convolutional:
         patch_transform = ConvolutionalSequence(
@@ -105,22 +108,23 @@ def construct_model(convolutional, patch_shape, initargs, hyperparameters, **kwa
                                                    dims=[patch_dim, patch_postdim],
                                                    **initargs).apply])
 
+    emitter = task.get_emitter(**hyperparameters)
+
     return Ram(patch_postdim=patch_postdim,
                patch_transform=patch_transform,
+               emitter=emitter,
                **hyperparameters)
 
-def construct_monitors(datasets, datastreams, cross_entropy,
-                       error_rate, n_patches, x, hs, locations,
-                       scales, patches, graph, **kwargs):
+def construct_monitors(task, task_channels, n_patches, x, hs,
+                       locations, scales, patches, graph, **kwargs):
     channels = util.Channels()
-    channels.add(cross_entropy)
-    channels.add(error_rate)
+    channels.extend(task_channels)
     for i in xrange(n_patches):
-        channels.add(hs[:, i].max(), "h%i_max" % i)
+        channels.append(hs[:, i].max(), "h%i_max" % i)
     #for activation in VariableFilter(roles=[OUTPUT])(graph.variables):
     #    quantity = activation.mean()
     #    quantity.name = "%s_mean" % activation.name
-    #    channels.add(quantity)
+    #    channels.append(quantity)
 
     monitors = OrderedDict()
     monitors["train"] = TrainingDataMonitoring(channels.get_channels(),
@@ -129,67 +133,52 @@ def construct_monitors(datasets, datastreams, cross_entropy,
     for which in "valid test".split():
         monitors[which] = DataStreamMonitoring(
             channels.get_channels(),
-            data_stream=datastreams[which],
+            data_stream=task.datastreams[which],
             prefix=which,
             after_epoch=True)
 
-    patch_monitoring_datastream = DataStream.default_stream(
-        datasets["valid"],
-        iteration_scheme=SequentialScheme(5, 5))
-    patch_monitoring = PatchMonitoring(patch_monitoring_datastream,
-                                       theano.function([x], [locations, scales, patches]))
+    patch_monitoring = PatchMonitoring(
+        task.get_stream("valid", SequentialScheme(5, 5)),
+        theano.function([x], [locations, scales, patches]))
     patch_monitoring.save_patches("test.png")
 
     return list(monitors.values()) + [patch_monitoring]
 
 def construct_main_loop(name, convolutional, patch_shape, batch_size,
-                        n_spatial_dims, n_patches, n_channels,
-                        n_epochs, learning_rate, hyperparameters,
-                        **kwargs):
-    # shape (batch, channel, height, width)
-    x = T.tensor4('features', dtype=floatX)
-    # shape (batch_size, ntargets)
-    y = T.lmatrix('targets')
+                        n_spatial_dims, n_patches, n_epochs,
+                        learning_rate, hyperparameters, **kwargs):
+    task = get_task(**hyperparameters)
+    x, y = task.get_variables()
 
-    theano.config.compute_test_value = 'warn'
-    x.tag.test_value = np.random.random((batch_size, n_channels, 28, 28)).astype("float32")
-    y.tag.test_value = np.random.random_integers(0, 9, (batch_size, 1)).astype("int64")
-
+    # this is a theano variable; it may depend on the batch
     hyperparameters["image_shape"] = x.shape[-n_spatial_dims:]
 
-    model = construct_model(**hyperparameters)
+    model = construct_model(task=task, **hyperparameters)
     model.initialize()
     yhats, hs, locations, scales, patches = model.compute(x, n_patches)
-    yhat = yhats[:, -1, :]
-
-    cross_entropy = util.named(CategoricalCrossEntropy().apply(y.flatten(), yhat),
-                               "cross_entropy")
-    error_rate = util.named(MisclassificationRate().apply(y.flatten(), yhat),
-                            "error_rate")
-
-    graph = ComputationGraph(cross_entropy)
+    cost, task_channels = task.compute(x, hs, yhats, y)
 
     print "setting up main loop..."
-    algorithm = GradientDescent(cost=cross_entropy,
+    graph = ComputationGraph(cost)
+    algorithm = GradientDescent(cost=cost,
                                 params=graph.parameters,
                                 step_rule=RMSProp(learning_rate=learning_rate))
-    datasets, datastreams = mnist.load(**hyperparameters)
-    monitors = construct_monitors(x=x, y=y, yhats=yhats, hs=hs,
-                                  locations=locations, scales=scales, patches=patches,
-                                  cross_entropy=cross_entropy, error_rate=error_rate,
-                                  datasets=datasets, datastreams=datastreams, graph=graph,
-                                  **hyperparameters)
-    main_loop = MainLoop(data_stream=datastreams["train"],
+    monitors = construct_monitors(x=x, y=y, hs=hs,
+                                  locations=locations, scales=scales,
+                                  patches=patches, task=task,
+                                  task_channels=task_channels,
+                                  graph=graph, **hyperparameters)
+    main_loop = MainLoop(data_stream=task.datastreams["train"],
                          algorithm=algorithm,
                          extensions=(monitors +
                                      [FinishAfter(after_n_epochs=n_epochs),
                                       ProgressBar(),
                                       Printing(),
                                       Plot(name,
-                                           channels=[["%s_cross_entropy" % which for which in datasets.keys()],
-                                                     ["%s_error_rate"    % which for which in datasets.keys()]],
+                                           channels=[["%s_cross_entropy" % which for which in task.datasets.keys()],
+                                                     ["%s_error_rate"    % which for which in task.datasets.keys()]],
                                            after_epoch=True)]),
-                         model=Model(cross_entropy))
+                         model=Model(cost))
     return main_loop
 
 if __name__ == "__main__":

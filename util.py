@@ -47,10 +47,14 @@ class Channels(object):
     def __init__(self):
         self.dikt = OrderedDict()
 
-    def add(self, quantity, name=None):
+    def append(self, quantity, name=None):
         if name is not None:
             quantity = named_copy(quantity, name)
         self.dikt.setdefault(quantity.name, []).append(quantity)
+
+    def extend(self, quantities):
+        for quantity in quantities:
+            self.append(quantity)
 
     def get_channels(self):
         channels = []

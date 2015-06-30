@@ -1,13 +1,12 @@
 name: "attention_rnn"
-shrink_dataset_by: 5
+task_name: "svhn_digit"
+shrink_dataset_by: 1
 n_epochs: 100
 batch_size: 100
 hidden_dim: 256
-n_patches: 4
+n_patches: 8
 patch_shape: [8, 8]
 area_dim: 128
-n_classes: 10
-n_channels: 1
 # whether patch should go through a convnet or an fcnet
 convolutional: False
 learning_rate: 1e-3
