@@ -46,8 +46,8 @@ class PatchMonitoring(SimpleExtension):
             patchess = np.squeeze(patchess, axis=2)
         else:
             # move channel axis to the end because pyplot wants this
-            images = np.rollaxis(images, 1, -1)
-            patchess = np.rollaxis(patchess, 2, -1)
+            images = np.rollaxis(images, 1, images.ndim)
+            patchess = np.rollaxis(patchess, 2, patchess.ndim)
 
         outer_grid = gridspec.GridSpec(batch_size, 2,
                                        width_ratios=[1, npatches])
