@@ -156,7 +156,7 @@ def construct_main_loop(name, convolutional, patch_shape, batch_size,
     model = construct_model(task=task, **hyperparameters)
     model.initialize()
     yhats, hs, locations, scales, patches = model.compute(x, n_patches)
-    cost, task_channels = task.compute(x, hs, yhats, y)
+    cost, task_channels, task_plots = task.compute(x, hs, yhats, y)
 
     print "setting up main loop..."
     graph = ComputationGraph(cost)
@@ -175,8 +175,7 @@ def construct_main_loop(name, convolutional, patch_shape, batch_size,
                                       ProgressBar(),
                                       Printing(),
                                       Plot(name,
-                                           channels=[["%s_cross_entropy" % which for which in task.datasets.keys()],
-                                                     ["%s_error_rate"    % which for which in task.datasets.keys()]],
+                                           channels=task_plots,
                                            after_epoch=True)]),
                          model=Model(cost))
     return main_loop
