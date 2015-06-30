@@ -78,8 +78,8 @@ class LocallySoftRectangularCropper(Brick):
             # will have the same length for each sample and scan can
             # be avoided.  comes at the cost of typically selecting
             # more of the input.
-            a = a.min(axis=0)
-            b = b.max(axis=0)
+            a = a.min(axis=0, keepdims=True)
+            b = b.max(axis=0, keepdims=True)
 
         # make integer
         a = T.cast(T.floor(a), 'int16')
@@ -91,12 +91,12 @@ class LocallySoftRectangularCropper(Brick):
 
         return a, b
 
-    @application(inputs=['image', 'location', 'scale'], outputs=['patch'])
+    @application(inputs=['image', 'location', 'scale'], outputs=['patch', 'mean_savings'])
     def apply(self, image, location, scale):
         a, b = self.compute_hard_windows(location, scale)
 
         if self.batched_window:
-            patch = self.apply_inner(image, location, scale, a, b)
+            patch = self.apply_inner(image, location, scale, a[0], b[0])
         else:
             def map_fn(image, a, b, location, scale):
                 # apply_inner expects a batch axis
@@ -112,7 +112,10 @@ class LocallySoftRectangularCropper(Brick):
             patch, _ = theano.map(map_fn,
                                   sequences=[image, a, b, location, scale])
 
-        return patch
+        mean_savings = (1 - T.cast((b - a).prod(axis=1), floatX) / self.image_shape.prod()).mean(axis=0)
+        self.add_auxiliary_variable(mean_savings, name="mean_savings")
+
+        return patch, mean_savings
 
     def apply_inner(self, image, location, scale, a, b):
         slices = [theano.gradient.disconnected_grad(T.arange(a[i], b[i]))
@@ -176,13 +179,13 @@ class SoftRectangularCropper(Brick):
             Ws.append(self.kernel(dx2, scale))
         return Ws
 
-    @application(inputs=['image', 'location', 'scale'], outputs=['patch'])
+    @application(inputs=['image', 'location', 'scale'], outputs=['patch', 'mean_savings'])
     def apply(self, image, location, scale):
         matrices = self.compute_crop_matrices(location, scale)
         patch = image
         for axis, matrix in enumerate(matrices):
             patch = T.batched_tensordot(patch, matrix, [[2], [1]])
-        return patch
+        return patch, 0
 
 def gaussian(x2, scale=1):
     sigma = 0.5 / scale

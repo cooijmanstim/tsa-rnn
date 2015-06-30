@@ -72,9 +72,12 @@ class Ram(object):
         # prepend initial values
         step_outputs = [T.concatenate([T.shape_padleft(initial_output), step_output], axis=0)
                         for initial_output, step_output in zip(initial_outputs, step_outputs)]
+        # mean_savings is special; it has no batch axis
+        mean_savings = step_outputs.pop()
         # move batch axis in front of RNN time axis
         step_outputs = [step_output.dimshuffle(1, 0, *range(step_output.ndim)[2:])
                         for step_output in step_outputs]
+        step_outputs.append(mean_savings)
         return step_outputs
 
 def get_task(task_name, hyperparameters, **kwargs):
@@ -116,8 +119,10 @@ def construct_model(task, convolutional, patch_shape, initargs,
                **hyperparameters)
 
 def construct_monitors(task, task_channels, n_patches, x, hs,
-                       locations, scales, patches, graph, **kwargs):
+                       locations, scales, patches, mean_savings,
+                       graph, **kwargs):
     channels = util.Channels()
+    channels.append(util.named(mean_savings.mean(), "mean_savings"))
     channels.extend(task_channels)
     for i in xrange(n_patches):
         channels.append(hs[:, i].max(), "h%i_max" % i)
@@ -155,7 +160,8 @@ def construct_main_loop(name, convolutional, patch_shape, batch_size,
 
     model = construct_model(task=task, **hyperparameters)
     model.initialize()
-    yhats, hs, locations, scales, patches = model.compute(x, n_patches)
+    
+    yhats, hs, locations, scales, patches, mean_savings = model.compute(x, n_patches)
     cost, task_channels, task_plots = task.compute(x, hs, yhats, y)
 
     print "setting up main loop..."
@@ -165,8 +171,8 @@ def construct_main_loop(name, convolutional, patch_shape, batch_size,
                                 step_rule=RMSProp(learning_rate=learning_rate))
     monitors = construct_monitors(x=x, y=y, hs=hs,
                                   locations=locations, scales=scales,
-                                  patches=patches, task=task,
-                                  task_channels=task_channels,
+                                  patches=patches, mean_savings=mean_savings,
+                                  task=task, task_channels=task_channels,
                                   graph=graph, **hyperparameters)
     main_loop = MainLoop(data_stream=task.datastreams["train"],
                          algorithm=algorithm,
