@@ -68,7 +68,6 @@ class DigitTask(object):
         error_rate = util.named(MisclassificationRate().apply(y.flatten(), yhat),
                                 "error_rate")
         monitor_channels = [cross_entropy, error_rate]
-        plot_channels = [["%s_%s" % (which_set, name) for which in task.datasets.keys()]
+        plot_channels = [["%s_%s" % (which_set, name) for which_set in self.datasets.keys()]
                          for name in "cross_entropy error_rate".split()]
         return cross_entropy, monitor_channels, plot_channels
-
