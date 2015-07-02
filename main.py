@@ -15,6 +15,7 @@ from fuel.streams import DataStream
 
 from blocks.initialization import IsotropicGaussian, Constant, NdarrayInitialization, Orthogonal, Identity
 from blocks.utils import named_copy
+from blocks.theano_expressions import l2_norm
 from blocks.model import Model
 from blocks.algorithms import GradientDescent, RMSProp
 from blocks.extensions.monitoring import TrainingDataMonitoring, DataStreamMonitoring
@@ -118,36 +119,47 @@ def construct_model(task, convolutional, patch_shape, initargs,
                emitter=emitter,
                **hyperparameters)
 
-def construct_monitors(task, task_channels, n_patches, x, hs,
-                       locations, scales, patches, mean_savings,
-                       graph, **kwargs):
+def construct_monitors(algorithm, task, task_channels, task_plots,
+                       n_patches, x, hs, locations, scales, patches,
+                       mean_savings, graph, plot_url, name, **kwargs):
     channels = util.Channels()
     channels.append(util.named(mean_savings.mean(), "mean_savings"))
     channels.extend(task_channels)
     for i in xrange(n_patches):
         channels.append(hs[:, i].max(), "h%i_max" % i)
+
+    step_norms = util.Channels()
+    step_norms.extend(util.named(l2_norm([step]),
+                                 "step_norm_%s" % param.name)
+                      for param, step in algorithm.steps.items())
+    step_channels = step_norms.get_channels()
     #for activation in VariableFilter(roles=[OUTPUT])(graph.variables):
     #    quantity = activation.mean()
     #    quantity.name = "%s_mean" % activation.name
     #    channels.append(quantity)
 
     monitors = OrderedDict()
-    monitors["train"] = TrainingDataMonitoring(channels.get_channels(),
-                                               prefix="train",
-                                               after_epoch=True)
+    monitors["train"] = TrainingDataMonitoring(
+        (channels.get_channels() + step_channels),
+        prefix="train", after_epoch=True)
     for which in "valid test".split():
         monitors[which] = DataStreamMonitoring(
             channels.get_channels(),
             data_stream=task.datastreams[which],
-            prefix=which,
-            after_epoch=True)
+            prefix=which, after_epoch=True)
 
     patch_monitoring = PatchMonitoring(
         task.get_stream("valid", SequentialScheme(5, 5)),
         theano.function([x], [locations, scales, patches]))
     patch_monitoring.save_patches("test.png")
 
-    return list(monitors.values()) + [patch_monitoring]
+    step_plots = [["train_%s" % step_channel.name for step_channel in step_channels]]
+    plotter = Plot(name,
+                   channels=(task_plots + step_plots),
+                   after_epoch=True,
+                   server_url=plot_url)
+
+    return list(monitors.values()) + [patch_monitoring, plotter]
 
 def construct_main_loop(name, convolutional, patch_shape, batch_size,
                         n_spatial_dims, n_patches, n_epochs,
@@ -169,20 +181,18 @@ def construct_main_loop(name, convolutional, patch_shape, batch_size,
     algorithm = GradientDescent(cost=cost,
                                 params=graph.parameters,
                                 step_rule=RMSProp(learning_rate=learning_rate))
-    monitors = construct_monitors(x=x, y=y, hs=hs,
-                                  locations=locations, scales=scales,
-                                  patches=patches, mean_savings=mean_savings,
-                                  task=task, task_channels=task_channels,
-                                  graph=graph, **hyperparameters)
+    monitors = construct_monitors(
+        x=x, y=y, hs=hs,
+        locations=locations, scales=scales, patches=patches,
+        mean_savings=mean_savings, algorithm=algorithm, task=task,
+        task_channels=task_channels, task_plots=task_plots,
+        graph=graph, **hyperparameters)
     main_loop = MainLoop(data_stream=task.datastreams["train"],
                          algorithm=algorithm,
                          extensions=(monitors +
                                      [FinishAfter(after_n_epochs=n_epochs),
                                       ProgressBar(),
-                                      Printing(),
-                                      Plot(name,
-                                           channels=task_plots,
-                                           after_epoch=True)]),
+                                      Printing()]),
                          model=Model(cost))
     return main_loop
 
