@@ -150,7 +150,8 @@ def construct_monitors(algorithm, task, task_channels, task_plots,
 
     patch_monitoring = PatchMonitoring(
         task.get_stream("valid", SequentialScheme(5, 5)),
-        theano.function([x], [locations, scales, patches]))
+        extractor=theano.function([x], [locations, scales, patches]),
+        map_to_image_space=masonry.SpatialAttention.static_map_to_image_space)
     patch_monitoring.save_patches("test.png")
 
     step_plots = [["train_%s" % step_channel.name for step_channel in step_channels]]

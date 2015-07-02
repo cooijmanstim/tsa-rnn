@@ -1,3 +1,6 @@
+import numpy as np
+
+import theano
 import theano.tensor as T
 
 from blocks.bricks.base import lazy, application, Brick
@@ -8,6 +11,8 @@ from blocks.bricks.conv import Flattener
 from blocks.initialization import Constant, IsotropicGaussian
 
 from util import NormalizedInitialization
+
+floatX = theano.config.floatX
 
 class Merger(Initializable):
     def __init__(self, n_spatial_dims, patch_postdim, area_dim, response_dim,
@@ -67,8 +72,7 @@ class Locator(Initializable):
     @application(inputs=['h'], outputs=['location', 'scale'])
     def apply(self, h):
         area = self.area.apply(h)
-        raw_location, raw_scale = self.fork.apply(area)
-        return raw_location, T.exp(raw_scale)
+        return self.fork.apply(area)
 
 class SpatialAttention(Initializable):
     def __init__(self, locator, cropper, merger, **kwargs):
@@ -80,6 +84,31 @@ class SpatialAttention(Initializable):
 
         self.children = [self.locator, self.cropper, self.merger]
 
+    def map_to_image_space(self, location, scale):
+        return self.static_map_to_image_space(
+            location, scale,
+            T.cast(self.cropper.patch_shape, floatX),
+            T.cast(self.cropper.image_shape, floatX))
+
+    @staticmethod
+    def static_map_to_image_space(location, scale, patch_shape, image_shape):
+        # linearly map locations from (-1, 1) to image index space
+        location = (location + 1) / 2 * image_shape
+        # take exp(scale) to ensure it is positive
+        scale = T.exp(scale) if isinstance(scale, T.TensorVariable) else np.exp(scale)
+        # multiply scale such that scale = 1 corresponds to shrinking
+        # the full image to fit into the patch.  i.e. by default the
+        # model looks at a very coarse version of the image, and can
+        # choose to selectively refine regions
+        scale *= patch_shape / image_shape
+        return location, scale
+
+    def compute_initial_location_scale(self, x):
+        location = T.alloc(T.cast(0.0, floatX),
+                           x.shape[0], self.cropper.n_spatial_dims)
+        scale = T.zeros_like(location)
+        return location, scale
+
     @application(inputs=['x', 'h'], outputs=['u', 'location', 'scale', 'patch', 'mean_savings'])
     def apply(self, x, h):
         location, scale = self.locator.apply(h)
@@ -87,13 +116,14 @@ class SpatialAttention(Initializable):
         return u, location, scale, patch, mean_savings
 
     def crop_and_merge(self, x, location, scale):
-        patch, mean_savings = self.cropper.apply(x, location, scale)
+        true_location, true_scale = self.map_to_image_space(location, scale)
+        patch, mean_savings = self.cropper.apply(x, true_location, true_scale)
         u = self.merger.apply(patch, location, scale)
         return u, patch, mean_savings
 
     @application(inputs=['x'], outputs="u0 location0 scale0 patch0 mean_savings0".split())
     def compute_initial_input(self, x):
-        location, scale = self.cropper.compute_initial_location_scale(x)
+        location, scale = self.compute_initial_location_scale(x)
         u, patch, mean_savings = self.crop_and_merge(x, location, scale)
         return u, location, scale, patch, mean_savings
 

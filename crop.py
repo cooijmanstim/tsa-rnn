@@ -18,21 +18,6 @@ class LocallySoftRectangularCropper(Brick):
         self.n_spatial_dims = n_spatial_dims
         self.batched_window = batched_window
 
-    @application(inputs=['x'], outputs=['location0', 'scale0'])
-    def compute_initial_location_scale(self, x):
-        # let patch cover entire image
-        location = T.alloc(T.cast(0.0, floatX),
-                           x.shape[0], self.n_spatial_dims)
-        scale = T.cast(self.patch_shape, floatX) / (2*self.true_location(location))
-        return location, scale
-
-    def true_location(self, location, axis=None):
-        # linearly map locations from (-1, 1) to image index space
-        image_dim = self.image_shape
-        if axis is not None:
-            image_dim = image_dim[axis]
-        return (location + 1) / 2 * image_dim
-
     def compute_crop_matrices(self, locations, scales, Is):
         Ws = []
         for axis in xrange(self.n_spatial_dims):
@@ -43,8 +28,6 @@ class LocallySoftRectangularCropper(Brick):
 
             location = locations[:, axis].dimshuffle(0, 'x', 'x')   # (batch_size, 1, 1)
             scale    = scales   [:, axis].dimshuffle(0, 'x', 'x')   # (batch_size, 1, 1)
-
-            location = self.true_location(location, axis)
 
             # map patch index into image index space
             J = (J - 0.5*n) / scale + location                      # (batch_size, 1, patch_dim)
@@ -65,8 +48,8 @@ class LocallySoftRectangularCropper(Brick):
 
     def compute_hard_windows(self, location, scale):
         # find topleft(front) and bottomright(back) corners for each patch
-        a = self.true_location(location) - 0.5 * (self.patch_shape / scale)
-        b = self.true_location(location) + 0.5 * (self.patch_shape / scale)
+        a = location - 0.5 * (self.patch_shape / scale)
+        b = location + 0.5 * (self.patch_shape / scale)
 
         # grow by three patch pixels
         # TODO: choose expansion to capture a given proportion of kernel volume (e.g. 2 sigma)

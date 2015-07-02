@@ -13,7 +13,7 @@ import matplotlib.patches
 from blocks.extensions import SimpleExtension
 
 class PatchMonitoring(SimpleExtension):
-    def __init__(self, data_stream, extractor, save_to=".", **kwargs):
+    def __init__(self, data_stream, extractor, map_to_image_space, save_to=".", **kwargs):
         kwargs.setdefault("before_first_epoch", True)
         kwargs.setdefault("after_epoch", True)
         if not os.path.isdir(save_to):
@@ -21,6 +21,7 @@ class PatchMonitoring(SimpleExtension):
         self.data_stream = data_stream
         self.save_to = save_to
         self.extractor = extractor
+        self.map_to_image_space = map_to_image_space
         self.colors = dict()
         super(PatchMonitoring, self).__init__(**kwargs)
 
@@ -60,13 +61,19 @@ class PatchMonitoring(SimpleExtension):
                                                           subplot_spec=outer_grid[i, 1],
                                                           wspace=0.1, hspace=0.1)
             for j, (patch, location, scale) in enumerate(zip(patches, locations, scales)):
+                true_location, true_scale = self.map_to_image_space(
+                    location, scale,
+                    np.array(patch_shape, dtype='float32'),
+                    np.array(image_shape, dtype='float32'))
+
                 patch_ax = plt.subplot(inner_grid[0, j])
                 self.imshow(patch, axes=patch_ax)
-                patch_ax.set_title("l (%3.2f, %3.2f)\ns (%3.2f, %3.2f)" % (location[0], location[1], scale[0], scale[1]))
+                patch_ax.set_title("l (%3.2f, %3.2f)\ns (%3.2f, %3.2f)" %
+                                   (location[0], location[1], true_scale[0], true_scale[1]))
                 patch_ax.axis("off")
 
-                patch_hw = patch_shape / scale
-                image_yx = (location + 1)/2 * image_shape - patch_hw/2.0
+                patch_hw = patch_shape / true_scale
+                image_yx = true_location - patch_hw/2.0
                 image_ax.add_patch(matplotlib.patches.Rectangle((image_yx[1], image_yx[0]),
                                                                 patch_hw[1], patch_hw[0],
                                                                 edgecolor="red",
