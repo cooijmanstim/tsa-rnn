@@ -143,17 +143,15 @@ class RecurrentAttentionModel(BaseRecurrent, Initializable):
         except KeyError:
             return super(RecurrentAttentionModel, self).get_dim(name)
 
-    @recurrent(sequences=[''], contexts=['x'], states=['h'], outputs=['yhat', 'h', 'location', 'scale', 'patch', 'mean_savings'])
+    @recurrent(sequences=[''], contexts=['x'], states=['h'], outputs=['h', 'location', 'scale', 'patch', 'mean_savings'])
     def apply(self, x, h):
         u, location, scale, patch, mean_savings = self.attention.apply(x, h)
         h = self.rnn.apply(states=h, inputs=u, iterate=False)
-        yhat = self.emitter.apply(h)
-        return yhat, h, location, scale, patch, mean_savings
+        return h, location, scale, patch, mean_savings
 
-    @application(inputs=['x'], outputs=['yhat0', 'h0', 'location0', 'scale0', 'patch0', 'mean_savings0'])
+    @application(inputs=['x'], outputs=['h0', 'location0', 'scale0', 'patch0', 'mean_savings0'])
     def compute_initial_state(self, x):
         u, location, scale, patch, mean_savings = self.attention.compute_initial_input(x)
         h = self.rnn.apply(states=self.rnn.initial_states(state_name="states", batch_size=x.shape[0]),
                            inputs=u, iterate=False)
-        yhat = self.emitter.apply(h)
-        return yhat, h, location, scale, patch, mean_savings
+        return h, location, scale, patch, mean_savings

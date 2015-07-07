@@ -69,7 +69,7 @@ class Ram(object):
 
     def compute(self, x, n_patches):
         initial_outputs = self.model.compute_initial_state(x)
-        step_outputs = self.model.apply(x=x, h=initial_outputs[1], n_steps=n_patches - 1, batch_size=x.shape[0])
+        step_outputs = self.model.apply(x=x, h=initial_outputs[0], n_steps=n_patches - 1, batch_size=x.shape[0])
         # prepend initial values
         step_outputs = [T.concatenate([T.shape_padleft(initial_output), step_output], axis=0)
                         for initial_output, step_output in zip(initial_outputs, step_outputs)]
@@ -174,11 +174,14 @@ def construct_main_loop(name, convolutional, patch_shape, batch_size,
     model = construct_model(task=task, **hyperparameters)
     model.initialize()
     
-    yhats, hs, locations, scales, patches, mean_savings = model.compute(x, n_patches)
-    cost, task_channels, task_plots = task.compute(x, hs, yhats, y)
+    hs, locations, scales, patches, mean_savings = model.compute(x, n_patches)
+    cost = model.emitter.cost(hs[:, -1, :], y)
 
     print "setting up main loop..."
     graph = ComputationGraph(cost)
+    task_channels = task.monitor_channels(graph)
+    task_plots = task.plot_channels()
+    uselessflunky = Model(cost)
     algorithm = GradientDescent(cost=cost,
                                 params=graph.parameters,
                                 step_rule=RMSProp(learning_rate=learning_rate))
@@ -187,7 +190,7 @@ def construct_main_loop(name, convolutional, patch_shape, batch_size,
         locations=locations, scales=scales, patches=patches,
         mean_savings=mean_savings, algorithm=algorithm, task=task,
         task_channels=task_channels, task_plots=task_plots,
-        graph=graph, **hyperparameters)
+        model=uselessflunky, graph=graph, **hyperparameters)
     main_loop = MainLoop(data_stream=task.datastreams["train"],
                          algorithm=algorithm,
                          extensions=(monitors +

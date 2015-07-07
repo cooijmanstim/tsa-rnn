@@ -4,7 +4,9 @@ import theano
 import theano.tensor as T
 
 from blocks.initialization import Orthogonal, Constant
-from blocks.bricks import MLP, Softmax
+from blocks.bricks import MLP, Softmax, Initializable
+from blocks.bricks.base import application
+from blocks.filter import VariableFilter
 from blocks.bricks.cost import CategoricalCrossEntropy, MisclassificationRate
 
 from fuel.transformers import Mapping
@@ -19,6 +21,34 @@ def fix_target_representation(data):
     # use zero to represent zero
     y[y == 10] = 0
     return x, y
+    
+class Emitter(Initializable):
+    def __init__(self, hidden_dim, n_classes, **kwargs):
+        super(Emitter, self).__init__(**kwargs)
+
+        self.hidden_dim = hidden_dim
+        self.n_classes = n_classes
+
+        self.mlp = MLP(activations=[Softmax()],
+                       dims=[hidden_dim, self.n_classes],
+                       weights_init=Orthogonal(),
+                       biases_init=Constant(0))
+        self.softmax = Softmax()
+
+        self.children = [self.mlp, self.softmax]
+
+    # some day: @application(...) def feedback(self, h)
+
+    @application(inputs=['h', 'y'])
+    def cost(self, h, y):
+        energy = self.mlp.apply(h)
+        cross_entropy = util.named(self.softmax.categorical_cross_entropy(y.flatten(), energy),
+                                   "cross_entropy")
+        error_rate = util.named(T.neq(y.flatten(), energy.argmax(axis=1)).mean(axis=0),
+                                "error_rate")
+        for variable in [cross_entropy, error_rate]:
+            self.add_auxiliary_variable(variable, name=variable.name)
+        return cross_entropy
 
 class DigitTask(object):
     def __init__(self, batch_size, hidden_dim, hyperparameters, shrink_dataset_by=1, **kwargs):
@@ -56,18 +86,13 @@ class DigitTask(object):
         return x, y
 
     def get_emitter(self, hidden_dim, **kwargs):
-        return MLP(activations=[Softmax()],
-                   dims=[hidden_dim, self.n_classes],
-                   weights_init=Orthogonal(),
-                   biases_init=Constant(0))
+        return Emitter(hidden_dim, self.n_classes)
 
-    def compute(self, x, hs, yhats, y):
-        yhat = yhats[:, -1, :]
-        cross_entropy = util.named(CategoricalCrossEntropy().apply(y.flatten(), yhat),
-                                   "cross_entropy")
-        error_rate = util.named(MisclassificationRate().apply(y.flatten(), yhat),
-                                "error_rate")
-        monitor_channels = [cross_entropy, error_rate]
-        plot_channels = [["%s_%s" % (which_set, name) for which_set in self.datasets.keys()]
-                         for name in "cross_entropy error_rate".split()]
-        return cross_entropy, monitor_channels, plot_channels
+    def monitor_channels(self, graph):
+        return [VariableFilter(name=name)(graph.auxiliary_variables)[0]
+                for name in "cross_entropy error_rate".split()]
+
+    def plot_channels(self):
+        return [["%s_%s" % (which_set, name) for which_set in self.datasets.keys()]
+                for name in "cross_entropy error_rate".split()]
+
