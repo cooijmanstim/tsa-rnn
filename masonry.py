@@ -104,6 +104,8 @@ class SpatialAttention(Initializable):
         # model looks at a very coarse version of the image, and can
         # choose to selectively refine regions
         scale *= patch_shape / image_shape
+        # avoid divisions by zero
+        scale += 1e-8
         return location, scale
 
     def compute_initial_location_scale(self, x):
