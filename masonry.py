@@ -27,7 +27,8 @@ class Merger(Initializable):
         self.area = Merge(input_names="location scale".split(),
                           input_dims=[n_spatial_dims, n_spatial_dims],
                           output_dim=area_dim,
-                          prototype=area_pretransform)
+                          prototype=area_pretransform,
+                          child_prefix="merger_area")
         self.area.children[0].use_bias = True
         self.area_posttransform = area_posttransform
 
@@ -35,7 +36,8 @@ class Merger(Initializable):
                               input_dims=[self.area.output_dim,
                                           patch_postdim],
                               output_dim=response_dim,
-                              prototype=response_pretransform)
+                              prototype=response_pretransform,
+                              child_prefix="merger_response")
         self.response.children[0].use_bias = True
         self.response_posttransform = response_posttransform
 
@@ -65,7 +67,8 @@ class Locator(Initializable):
         self.fork = Fork(output_names=['raw_location', 'raw_scale'],
                          input_dim=self.area.output_dim,
                          output_dims=[n_spatial_dims, n_spatial_dims],
-                         prototype=prototype)
+                         prototype=prototype,
+                         child_prefix="locator_location_scale")
 
         self.children = [self.area, self.fork]
 

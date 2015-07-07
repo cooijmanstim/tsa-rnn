@@ -65,7 +65,7 @@ class Channels(object):
                 # name not unique; uniquefy
                 for i, quantity in enumerate(quantities):
                     channels.append(named_copy(
-                        quantity, "[%i]%s" % (i, quantity.name)))
+                        quantity, "%s[%i]" % (i, quantity.name)))
         return channels
 
 # L1-normalize along an axis (default: normalize columns, which for

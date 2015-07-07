@@ -62,7 +62,8 @@ class Ram(object):
         self.rnn = SimpleRecurrent(activation=Rectifier(),
                                    dim=hidden_dim,
                                    weights_init=Identity(),
-                                   biases_init=Constant(0))
+                                   biases_init=Constant(0),
+                                   name="recurrent")
         self.model = masonry.RecurrentAttentionModel(
             self.rnn, self.attention, self.emitter, **initargs)
 
@@ -124,7 +125,8 @@ def construct_model(task, convolutional, patch_shape, initargs,
 
 def construct_monitors(algorithm, task, task_channels, task_plots,
                        n_patches, x, hs, locations, scales, patches,
-                       mean_savings, graph, plot_url, name, **kwargs):
+                       mean_savings, graph, plot_url, name, model,
+                       **kwargs):
     channels = util.Channels()
     channels.append(util.named(mean_savings.mean(), "mean_savings"))
     channels.extend(task_channels)
@@ -132,9 +134,9 @@ def construct_monitors(algorithm, task, task_channels, task_plots,
         channels.append(hs[:, i].max(), "h%i_max" % i)
 
     step_norms = util.Channels()
-    step_norms.extend(util.named(l2_norm([step]),
-                                 "step_norm_%s" % param.name)
-                      for param, step in algorithm.steps.items())
+    step_norms.extend(util.named(l2_norm([algorithm.steps[param]]),
+                                 "step_norm_%s" % name)
+                      for name, param in model.params.items())
     step_channels = step_norms.get_channels()
     #for activation in VariableFilter(roles=[OUTPUT])(graph.variables):
     #    quantity = activation.mean()
