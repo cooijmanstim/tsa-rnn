@@ -16,6 +16,7 @@ from fuel.streams import DataStream
 from blocks.initialization import IsotropicGaussian, Constant, NdarrayInitialization, Orthogonal, Identity
 from blocks.utils import named_copy
 from blocks.theano_expressions import l2_norm
+from blocks.serialization import load_parameter_values
 from blocks.model import Model
 from blocks.algorithms import GradientDescent, RMSProp
 from blocks.extensions.monitoring import TrainingDataMonitoring, DataStreamMonitoring
@@ -39,6 +40,8 @@ from patchmonitor import PatchMonitoring
 import mnist
 import svhn
 import goodfellow_svhn
+
+from dump import Dump, DumpMinimum
 
 floatX = theano.config.floatX
 
@@ -200,6 +203,9 @@ def construct_main_loop(name, convolutional, patch_shape, batch_size,
                          algorithm=algorithm,
                          extensions=(monitors +
                                      [FinishAfter(after_n_epochs=n_epochs),
+                                      DumpMinimum(name+'_best', channel_name='valid_error_rate'),
+                                      Dump(name+'_dump', every_n_epochs=1),
+                                      Checkpoint(name+'_checkpoint.pkl', every_n_epochs=1, on_interrupt=False),
                                       ProgressBar(),
                                       Printing()]),
                          model=Model(cost))
@@ -210,9 +216,10 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--hyperparameters", help="YAML file from which to load hyperparameters")
+    parser.add_argument("--parameters", help="pickle file from which to load parameters")
 
     args = parser.parse_args()
-    
+
     with open(os.path.join(os.path.dirname(__file__), "defaults.yaml"), "rb") as f:
         hyperparameters = yaml.load(f)
     if args.hyperparameters:
@@ -225,5 +232,11 @@ if __name__ == "__main__":
     hyperparameters["hyperparameters"] = hyperparameters
 
     main_loop = construct_main_loop(**hyperparameters)
+
+    if args.parameters:
+        # pickle made with blocks.serialization.dump(model.params)
+        params = load_parameter_values(args.parameters)
+        main_loop.model.set_param_values(params)
+
     print "training..."
     main_loop.run()
