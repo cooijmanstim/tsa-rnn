@@ -35,8 +35,10 @@ import masonry
 import crop
 import util
 from patchmonitor import PatchMonitoring
+
 import mnist
 import svhn
+import goodfellow_svhn
 
 floatX = theano.config.floatX
 
@@ -83,7 +85,8 @@ class Ram(object):
 
 def get_task(task_name, hyperparameters, **kwargs):
     klass = dict(mnist=mnist.Task,
-                 svhn_digit=svhn.DigitTask)[task_name]
+                 svhn_digit=svhn.DigitTask,
+                 svhn_number=goodfellow_svhn.NumberTask)[task_name]
     return klass(**hyperparameters)
 
 def construct_model(task, convolutional, patch_shape, initargs,
