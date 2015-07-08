@@ -24,7 +24,7 @@ from blocks.extensions.saveload import Checkpoint
 from blocks.main_loop import MainLoop
 from blocks.extensions import FinishAfter, Printing, ProgressBar
 from blocks.roles import PARAMETER, OUTPUT, INPUT, DROPOUT
-from blocks.bricks import Softmax, Rectifier, Brick, application, MLP, FeedforwardSequence
+from blocks.bricks import Softmax, Rectifier, Brick, application, MLP, FeedforwardSequence, Tanh
 from blocks.bricks.recurrent import LSTM, SimpleRecurrent
 from blocks.graph import ComputationGraph
 from blocks.bricks.cost import CategoricalCrossEntropy, MisclassificationRate
@@ -63,7 +63,7 @@ class Ram(object):
             **initargs)
         self.attention = masonry.SpatialAttention(self.locator, self.cropper, self.merger)
         self.emitter = emitter
-        self.rnn = SimpleRecurrent(activation=Rectifier(),
+        self.rnn = SimpleRecurrent(activation=Tanh(),
                                    dim=hidden_dim,
                                    weights_init=Identity(),
                                    biases_init=Constant(0),
