@@ -110,8 +110,7 @@ class SpatialAttention(Initializable):
     def compute_initial_location_scale(self, x):
         location = T.alloc(T.cast(0.0, floatX),
                            x.shape[0], self.cropper.n_spatial_dims)
-        # shrink the image to fit in the patch exactly
-        scale = T.ones_like(location) * patch_shape / image_shape
+        scale = T.zeros_like(location)
         return location, scale
 
     @application(inputs=['x', 'h'], outputs=['u', 'location', 'scale', 'patch', 'mean_savings'])
