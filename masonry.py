@@ -77,6 +77,20 @@ class Locator(Initializable):
         area = self.area.apply(h)
         return self.fork.apply(area)
 
+# this belongs on SpatialAttention as a static method, but that breaks pickling
+def static_map_to_image_space(location, scale, patch_shape, image_shape):
+    # linearly map locations from (-1, 1) to image index space
+    location = (location + 1) / 2 * image_shape
+    # disallow negative scale
+    scale *= scale > 0
+    # translate scale such that scale = 0 corresponds to shrinking the
+    # full image to fit into the patch, and the model can only zoom in
+    # beyond that.  i.e. by default the model looks at a very coarse
+    # version of the image, and can choose to selectively refine
+    # regions
+    scale += patch_shape / image_shape
+    return location, scale
+
 class SpatialAttention(Initializable):
     def __init__(self, locator, cropper, merger, **kwargs):
         super(SpatialAttention, self).__init__(**kwargs)
@@ -88,20 +102,10 @@ class SpatialAttention(Initializable):
         self.children = [self.locator, self.cropper, self.merger]
 
     def map_to_image_space(self, location, scale):
-        return self.static_map_to_image_space(
+        return static_map_to_image_space(
             location, scale,
             T.cast(self.cropper.patch_shape, floatX),
             T.cast(self.cropper.image_shape, floatX))
-
-    @staticmethod
-    def static_map_to_image_space(location, scale, patch_shape, image_shape):
-        # linearly map locations from (-1, 1) to image index space
-        location = (location + 1) / 2 * image_shape
-        # take exp(scale) to ensure it is positive
-        scale = T.exp(scale) if isinstance(scale, T.TensorVariable) else np.exp(scale)
-        # avoid divisions by zero
-        scale += 1e-8
-        return location, scale
 
     def compute_initial_location_scale(self, x):
         location = T.alloc(T.cast(0.0, floatX),

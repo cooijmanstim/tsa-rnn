@@ -53,7 +53,7 @@ class Ram(object):
         self.locator = masonry.Locator(hidden_dim, area_dim, n_spatial_dims)
         self.cropper = crop.LocallySoftRectangularCropper(
             n_spatial_dims, image_shape, patch_shape,
-            crop.gaussian,
+            crop.Gaussian(),
             batched_window=batched_window)
         self.merger = masonry.Merger(
             n_spatial_dims, patch_postdim, area_dim, hidden_dim,
@@ -160,7 +160,7 @@ def construct_monitors(algorithm, task, task_channels, task_plots,
     patch_monitoring = PatchMonitoring(
         task.get_stream("valid", SequentialScheme(5, 5)),
         extractor=theano.function([x], [locations, scales, patches]),
-        map_to_image_space=masonry.SpatialAttention.static_map_to_image_space)
+        map_to_image_space=masonry.static_map_to_image_space)
     patch_monitoring.save_patches("test.png")
 
     step_plots = [["train_%s" % step_channel.name for step_channel in step_channels]]
