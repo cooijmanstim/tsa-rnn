@@ -99,11 +99,6 @@ class SpatialAttention(Initializable):
         location = (location + 1) / 2 * image_shape
         # take exp(scale) to ensure it is positive
         scale = T.exp(scale) if isinstance(scale, T.TensorVariable) else np.exp(scale)
-        # multiply scale such that scale = 1 corresponds to shrinking
-        # the full image to fit into the patch.  i.e. by default the
-        # model looks at a very coarse version of the image, and can
-        # choose to selectively refine regions
-        scale *= patch_shape / image_shape
         # avoid divisions by zero
         scale += 1e-8
         return location, scale
@@ -111,7 +106,8 @@ class SpatialAttention(Initializable):
     def compute_initial_location_scale(self, x):
         location = T.alloc(T.cast(0.0, floatX),
                            x.shape[0], self.cropper.n_spatial_dims)
-        scale = T.zeros_like(location)
+        # shrink the image to fit in the patch exactly
+        scale = T.ones_like(location) * patch_shape / image_shape
         return location, scale
 
     @application(inputs=['x', 'h'], outputs=['u', 'location', 'scale', 'patch', 'mean_savings'])
