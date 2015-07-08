@@ -53,7 +53,7 @@ class Ram(object):
         self.locator = masonry.Locator(hidden_dim, area_dim, n_spatial_dims)
         self.cropper = crop.LocallySoftRectangularCropper(
             n_spatial_dims, image_shape, patch_shape,
-            crop.gaussian,
+            crop.Gaussian(),
             batched_window=batched_window)
         self.merger = masonry.Merger(
             n_spatial_dims, patch_postdim, area_dim, hidden_dim,

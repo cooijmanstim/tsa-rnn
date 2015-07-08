@@ -43,7 +43,7 @@ class LocallySoftRectangularCropper(Brick):
             IJ = I * J                # (batch_size, hardcrop_dim, patch_dim)
             dx2 = I**2 + J**2 - 2*IJ  # (batch_size, hardcrop_dim, patch_dim)
 
-            Ws.append(self.kernel(dx2, scale))
+            Ws.append(self.kernel.density(dx2, scale))
         return Ws
 
     def compute_hard_windows(self, location, scale):
@@ -52,9 +52,8 @@ class LocallySoftRectangularCropper(Brick):
         b = location + 0.5 * (self.patch_shape / scale)
 
         # grow by three patch pixels
-        # TODO: choose expansion to capture a given proportion of kernel volume (e.g. 2 sigma)
-        a -= 3 / scale
-        b += 3 / scale
+        a -= self.kernel.three_sigma_radius(scale)
+        b += self.kernel.three_sigma_radius(scale)
 
         if self.batched_window:
             # take the bounding box of all windows; now the slices
@@ -159,7 +158,7 @@ class SoftRectangularCropper(Brick):
             IJ = I * J                # (batch_size, image_dim, patch_dim)
             dx2 = I**2 + J**2 - 2*IJ  # (batch_size, image_dim, patch_dim)
 
-            Ws.append(self.kernel(dx2, scale))
+            Ws.append(self.kernel.density(dx2, scale))
         return Ws
 
     @application(inputs=['image', 'location', 'scale'], outputs=['patch', 'mean_savings'])
@@ -170,7 +169,16 @@ class SoftRectangularCropper(Brick):
             patch = T.batched_tensordot(patch, matrix, [[2], [1]])
         return patch, 0
 
-def gaussian(x2, scale=1):
-    sigma = 0.5 / scale
-    volume = T.sqrt(2*math.pi)*sigma
-    return T.exp(-0.5*x2/(sigma**2)) / volume
+class Gaussian(object):
+    def density(self, x2, scale):
+        sigma = self.sigma(scale)
+        volume = T.sqrt(2*math.pi)*sigma
+        return T.exp(-0.5*x2/(sigma**2)) / volume
+
+    def sigma(self, scale):
+        return 0.5 / scale
+
+    def three_sigma_radius(self, scale):
+        # this isn't correct in multiple dimensions, but it's good enough
+        return 3 * self.sigma(scale)
+
