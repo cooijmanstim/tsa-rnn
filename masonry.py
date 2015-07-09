@@ -15,25 +15,18 @@ from util import NormalizedInitialization
 floatX = theano.config.floatX
 
 class Merger(Initializable):
-    def __init__(self, n_spatial_dims, patch_postdim, area_dim, response_dim,
+    def __init__(self, n_spatial_dims, patch_postdim, response_dim,
                  patch_posttransform=None,
-                 area_pretransform=None, response_pretransform=None,
-                 area_posttransform=None, response_posttransform=None,
+                 response_pretransform=None,
+                 response_posttransform=None,
                  **kwargs):
         super(Merger, self).__init__(**kwargs)
 
         self.patch_posttransform = FeedforwardSequence([patch_posttransform, Flattener().apply])
 
-        self.area = Merge(input_names="location scale".split(),
-                          input_dims=[n_spatial_dims, n_spatial_dims],
-                          output_dim=area_dim,
-                          prototype=area_pretransform,
-                          child_prefix="merger_area")
-        self.area.children[0].use_bias = True
-        self.area_posttransform = area_posttransform
-
-        self.response = Merge(input_names="area patch".split(),
-                              input_dims=[self.area.output_dim,
+        self.response = Merge(input_names="location scale patch".split(),
+                              input_dims=[n_spatial_dims,
+                                          n_spatial_dims,
                                           patch_postdim],
                               output_dim=response_dim,
                               prototype=response_pretransform,
@@ -41,8 +34,7 @@ class Merger(Initializable):
         self.response.children[0].use_bias = True
         self.response_posttransform = response_posttransform
 
-        self.children = [self.area, self.response, self.patch_posttransform,
-                         self.area_posttransform, self.response_posttransform]
+        self.children = [self.response, self.patch_posttransform, self.response_posttransform]
 
     @application(inputs="patch location scale".split(),
                  outputs=['response'])
@@ -51,34 +43,29 @@ class Merger(Initializable):
         # the location/scale as merely additional hidden units
         #location, scale = list(map(theano.gradient.disconnected_grad, (location, scale)))
         patch = self.patch_posttransform.apply(patch)
-        area = self.area.apply(location, scale)
-        area = self.area_posttransform.apply(area)
-        response = self.response.apply(area, patch)
+        response = self.response.apply(location, scale, patch)
         response = self.response_posttransform.apply(response)
         return response
 
 class Locator(Initializable):
-    def __init__(self, input_dim, area_dim, n_spatial_dims, area_posttransform=Rectifier(), **kwargs):
+    def __init__(self, input_dim, n_spatial_dims, **kwargs):
         super(Locator, self).__init__(**kwargs)
-
-        self.area = MLP(activations=[area_posttransform], dims=[input_dim, area_dim])
 
         # these are huge reductions in dimensionality, so use
         # normalized initialization to avoid huge values.
         prototype = Linear(weights_init=NormalizedInitialization(IsotropicGaussian(std=1e-3)),
                            biases_init=Constant(0))
         self.fork = Fork(output_names=['raw_location', 'raw_scale'],
-                         input_dim=self.area.output_dim,
+                         input_dim=input_dim,
                          output_dims=[n_spatial_dims, n_spatial_dims],
                          prototype=prototype,
                          child_prefix="locator_location_scale")
 
-        self.children = [self.area, self.fork]
+        self.children = [self.fork]
 
     @application(inputs=['h'], outputs=['location', 'scale'])
     def apply(self, h):
-        area = self.area.apply(h)
-        return self.fork.apply(area)
+        return self.fork.apply(h)
 
 # this belongs on SpatialAttention as a static method, but that breaks pickling
 def static_map_to_image_space(location, scale, patch_shape, image_shape):

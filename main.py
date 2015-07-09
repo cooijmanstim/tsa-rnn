@@ -48,17 +48,16 @@ floatX = theano.config.floatX
 
 class Ram(object):
     def __init__(self, image_shape, patch_shape, patch_transform,
-                 patch_postdim, hidden_dim, area_dim, n_spatial_dims,
+                 patch_postdim, hidden_dim, n_spatial_dims,
                  batched_window, initargs, emitter, **kwargs):
-        self.locator = masonry.Locator(hidden_dim, area_dim, n_spatial_dims)
+        self.locator = masonry.Locator(hidden_dim, n_spatial_dims)
         self.cropper = crop.LocallySoftRectangularCropper(
             n_spatial_dims, image_shape, patch_shape,
             crop.Gaussian(),
             batched_window=batched_window)
         self.merger = masonry.Merger(
-            n_spatial_dims, patch_postdim, area_dim, hidden_dim,
+            n_spatial_dims, patch_postdim, hidden_dim,
             patch_posttransform=patch_transform.apply,
-            area_posttransform=Rectifier(),
             response_posttransform=Rectifier(),
             **initargs)
         self.attention = masonry.SpatialAttention(self.locator, self.cropper, self.merger)
