@@ -47,6 +47,9 @@ class Merger(Initializable):
     @application(inputs="patch location scale".split(),
                  outputs=['response'])
     def apply(self, patch, location, scale):
+        # don't backpropagate through these to avoid the model using
+        # the location/scale as merely additional hidden units
+        #location, scale = list(map(theano.gradient.disconnected_grad, (location, scale)))
         patch = self.patch_posttransform.apply(patch)
         area = self.area.apply(location, scale)
         area = self.area_posttransform.apply(area)
