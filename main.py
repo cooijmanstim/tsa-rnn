@@ -136,6 +136,13 @@ def construct_monitors(algorithm, task, task_channels, task_plots,
     for i in xrange(n_patches):
         channels.append(hs[:, i].mean(), "h%i_mean" % i)
 
+    for variable_name in "locations scales".split():
+        variable = locals()[variable_name]
+        channels.append(variable.var(axis=0).mean(),
+                        "%s_variance_across_batch" % variable_name)
+        channels.append(variable.var(axis=1).mean(),
+                        "%s_variance_across_time" % variable_name)
+
     step_norms = util.Channels()
     step_norms.extend(util.named(l2_norm([algorithm.steps[param]]),
                                  "step_norm_%s" % name)
