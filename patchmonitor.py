@@ -14,8 +14,9 @@ from blocks.extensions import SimpleExtension
 
 class PatchMonitoring(SimpleExtension):
     def __init__(self, data_stream, extractor, map_to_image_space, save_to=".", **kwargs):
-        kwargs.setdefault("before_first_epoch", True)
-        kwargs.setdefault("after_epoch", True)
+        kwargs.setdefault("every_n_batches", 10)
+#        kwargs.setdefault("before_first_epoch", True)
+#        kwargs.setdefault("after_epoch", True)
         if not os.path.isdir(save_to):
             os.makedirs(save_to)
         self.data_stream = data_stream
@@ -28,7 +29,7 @@ class PatchMonitoring(SimpleExtension):
     def do(self, which_callback, *args):
         current_dir = os.getcwd()
         os.chdir(self.save_to)
-        self.save_patches("patches_epoch_%i.png" % self.main_loop.status['epochs_done'])
+        self.save_patches("patches_iteration_%i.png" % self.main_loop.status['iterations_done'])
         os.chdir(current_dir)
 
     def save_patches(self, filename):
