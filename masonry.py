@@ -116,19 +116,20 @@ class SpatialAttention(Initializable):
     @application(inputs=['x', 'h'], outputs=['u', 'location', 'scale', 'patch', 'mean_savings'])
     def apply(self, x, h):
         location, scale = self.locator.apply(h)
-        u, patch, mean_savings = self.crop_and_merge(x, location, scale)
+        patch, mean_savings = self.crop(x, location, scale)
+        u = self.merger.apply(patch, location, scale)
         return u, location, scale, patch, mean_savings
 
-    def crop_and_merge(self, x, location, scale):
+    def crop(self, x, location, scale):
         true_location, true_scale = self.map_to_image_space(location, scale)
         patch, mean_savings = self.cropper.apply(x, true_location, true_scale)
-        u = self.merger.apply(patch, location, scale)
-        return u, patch, mean_savings
+        return patch, mean_savings
 
     @application(inputs=['x'], outputs="u0 location0 scale0 patch0 mean_savings0".split())
     def compute_initial_input(self, x):
         location, scale = self.compute_initial_location_scale(x)
-        u, patch, mean_savings = self.crop_and_merge(x, location, scale)
+        patch, mean_savings = self.crop(x, location, scale)
+        u = self.merger.apply(patch, location, scale)
         return u, location, scale, patch, mean_savings
 
 class RecurrentAttentionModel(BaseRecurrent, Initializable):

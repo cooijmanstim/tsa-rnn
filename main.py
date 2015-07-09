@@ -128,9 +128,9 @@ def construct_model(task, convolutional, patch_shape, initargs,
                **hyperparameters)
 
 def construct_monitors(algorithm, task, task_channels, task_plots,
-                       n_patches, x, hs, locations, scales, patches,
-                       mean_savings, graph, plot_url, name, model,
-                       **kwargs):
+                       n_patches, x, x_uncentered, hs, locations,
+                       scales, patches, mean_savings, graph, plot_url,
+                       name, model, **kwargs):
     channels = util.Channels()
     channels.append(util.named(mean_savings.mean(), "mean_savings"))
     channels.extend(task_channels)
@@ -159,7 +159,7 @@ def construct_monitors(algorithm, task, task_channels, task_plots,
 
     patch_monitoring = PatchMonitoring(
         task.get_stream("valid", SequentialScheme(5, 5)),
-        extractor=theano.function([x], [locations, scales, patches]),
+        extractor=theano.function([x_uncentered], [locations, scales, patches]),
         map_to_image_space=masonry.static_map_to_image_space)
     patch_monitoring.save_patches("test.png")
 
@@ -175,16 +175,24 @@ def construct_main_loop(name, convolutional, patch_shape, batch_size,
                         n_spatial_dims, n_patches, n_epochs,
                         learning_rate, hyperparameters, **kwargs):
     task = get_task(**hyperparameters)
-    x, y = task.get_variables()
+    x_uncentered, y = task.get_variables()
+
+    x = task.preprocess(x_uncentered)
 
     # this is a theano variable; it may depend on the batch
     hyperparameters["image_shape"] = x.shape[-n_spatial_dims:]
 
     model = construct_model(task=task, **hyperparameters)
     model.initialize()
-    
+
     hs, locations, scales, patches, mean_savings = model.compute(x, n_patches)
     cost = model.emitter.cost(hs[:, -1, :], y)
+
+    # get patches from original (uncentered) images
+    patches = T.stack(*[model.attention.crop(x_uncentered, locations[:, i, :], scales[:, i, :])[0]
+                        for i in xrange(n_patches)])
+    # zzz
+    patches = patches.dimshuffle(1, 0, *range(2, patches.ndim))
 
     print "setting up main loop..."
     graph = ComputationGraph(cost)
@@ -195,7 +203,7 @@ def construct_main_loop(name, convolutional, patch_shape, batch_size,
                                 params=graph.parameters,
                                 step_rule=RMSProp(learning_rate=learning_rate))
     monitors = construct_monitors(
-        x=x, y=y, hs=hs,
+        x=x, x_uncentered=x_uncentered, y=y, hs=hs,
         locations=locations, scales=scales, patches=patches,
         mean_savings=mean_savings, algorithm=algorithm, task=task,
         task_channels=task_channels, task_plots=task_plots,

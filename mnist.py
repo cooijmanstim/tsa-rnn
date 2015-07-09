@@ -1,3 +1,5 @@
+import operator
+
 import numpy as np
 
 import theano
@@ -90,3 +92,11 @@ class Task(object):
     def plot_channels(self):
         return [["%s_%s" % (which_set, name) for which_set in self.datasets.keys()]
                 for name in "cross_entropy error_rate".split()]
+
+    def preprocess(self, x):
+        print "taking mean"
+        mean = reduce(operator.add,
+                      (batch["features"].mean(axis=0, keepdims=True)
+                       for batch in self.datastreams["train"].get_epoch_iterator(as_dict=True)))
+        print "mean taken"
+        return x - mean
