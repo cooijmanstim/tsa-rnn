@@ -135,7 +135,7 @@ def construct_monitors(algorithm, task, task_channels, task_plots,
     channels.append(util.named(mean_savings.mean(), "mean_savings"))
     channels.extend(task_channels)
     for i in xrange(n_patches):
-        channels.append(hs[:, i].max(), "h%i_max" % i)
+        channels.append(hs[:, i].mean(), "h%i_mean" % i)
 
     step_norms = util.Channels()
     step_norms.extend(util.named(l2_norm([algorithm.steps[param]]),
