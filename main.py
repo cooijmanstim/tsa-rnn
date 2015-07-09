@@ -107,7 +107,7 @@ def construct_model(task, convolutional, patch_shape, initargs,
                                        name="patch_conv_%i" % i)
                     for i in xrange(2)],
             num_channels=n_channels,
-            image_size=patch_shape,
+            image_size=tuple(patch_shape),
             weights_init=IsotropicGaussian(std=1e-8),
             biases_init=Constant(0))
         patch_transform.push_allocation_config()
