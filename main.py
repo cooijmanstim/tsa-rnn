@@ -94,18 +94,18 @@ def get_task(task_name, hyperparameters, **kwargs):
                  svhn_number=goodfellow_svhn.NumberTask)[task_name]
     return klass(**hyperparameters)
 
-def construct_model(task, convolutional, patch_shape, initargs,
-                    n_channels, hyperparameters, **kwargs):
+def construct_model(task, patch_transform_spec,
+                    patch_shape, initargs, n_channels,
+                    hyperparameters, **kwargs):
     patch_dim = n_channels * reduce(op.mul, patch_shape)
 
-    if convolutional:
+    if patch_transform_spec.get("convolutional"):
+        layer_specs = patch_transform_spec["convolutional"]
         patch_transform = ConvolutionalSequence(
             layers=[ConvolutionalLayer(activation=Rectifier().apply,
-                                       filter_size=(3, 3),
-                                       pooling_size=(2, 2),
-                                       num_filters=patch_dim*(i+1),
-                                       name="patch_conv_%i" % i)
-                    for i in xrange(2)],
+                                       name="patch_conv_%i" % i,
+                                       **layer_spec)
+                    for i, layer_spec in enumerate(layer_specs)],
             num_channels=n_channels,
             image_size=tuple(patch_shape),
             weights_init=IsotropicGaussian(std=1e-8),
@@ -113,12 +113,15 @@ def construct_model(task, convolutional, patch_shape, initargs,
         patch_transform.push_allocation_config()
         # ConvolutionalSequence doesn't provide output_dim
         patch_postdim = reduce(op.mul, patch_transform.get_dim("output"))
-    else:
-        patch_postdim = 128
+    elif patch_transform_spec.get("mlp"):
+        hidden_dims = patch_transform_spec.get("mlp")
+        activations = [Rectifier() for i in xrange(len(hidden_dims))]
+        dims = [patch_dim] + hidden_dims
         patch_transform = FeedforwardSequence([Flattener().apply,
-                                               MLP(activations=[Rectifier()],
-                                                   dims=[patch_dim, patch_postdim],
+                                               MLP(activations=activations,
+                                                   dims=dims,
                                                    **initargs).apply])
+        patch_postdim = patch_transform.output_dim
 
     emitter = task.get_emitter(**hyperparameters)
 
@@ -178,7 +181,7 @@ def construct_monitors(algorithm, task, task_channels, task_plots,
 
     return list(monitors.values()) + [patch_monitoring, plotter]
 
-def construct_main_loop(name, convolutional, patch_shape, batch_size,
+def construct_main_loop(name, patch_shape, batch_size,
                         n_spatial_dims, n_patches, n_epochs,
                         learning_rate, hyperparameters, **kwargs):
     task = get_task(**hyperparameters)
