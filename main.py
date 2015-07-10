@@ -133,7 +133,7 @@ def construct_model(task, patch_transform_spec,
 def construct_monitors(algorithm, task, task_channels, task_plots,
                        n_patches, x, x_uncentered, hs, locations,
                        scales, patches, mean_savings, graph, plot_url,
-                       name, model, **kwargs):
+                       name, model, patchmonitor_interval=100, **kwargs):
     channels = util.Channels()
     channels.append(util.named(mean_savings.mean(), "mean_savings"))
     channels.extend(task_channels)
@@ -169,6 +169,7 @@ def construct_monitors(algorithm, task, task_channels, task_plots,
 
     patch_monitoring = PatchMonitoring(
         task.get_stream("valid", SequentialScheme(5, 5)),
+        every_n_batches=patchmonitor_interval,
         extractor=theano.function([x_uncentered], [locations, scales, patches]),
         map_to_image_space=masonry.static_map_to_image_space)
     patch_monitoring.save_patches("test.png")
