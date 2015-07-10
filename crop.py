@@ -10,11 +10,12 @@ from blocks.bricks import Softmax, Rectifier, Brick, application, MLP
 import util
 
 class LocallySoftRectangularCropper(Brick):
-    def __init__(self, n_spatial_dims, image_shape, patch_shape, kernel, batched_window=False, **kwargs):
+    def __init__(self, n_spatial_dims, image_shape, patch_shape, kernel, batched_window=False, cutoff=3, **kwargs):
         super(LocallySoftRectangularCropper, self).__init__(**kwargs)
         self.image_shape = T.cast(image_shape, 'int16')
         self.patch_shape = patch_shape
         self.kernel = kernel
+        self.cutoff = cutoff
         self.n_spatial_dims = n_spatial_dims
         self.batched_window = batched_window
 
@@ -52,8 +53,8 @@ class LocallySoftRectangularCropper(Brick):
         b = location + 0.5 * (self.patch_shape / scale)
 
         # grow by three patch pixels
-        a -= self.kernel.three_sigma_radius(scale)
-        b += self.kernel.three_sigma_radius(scale)
+        a -= self.kernel.k_sigma_radius(self.cutoff, scale)
+        b += self.kernel.k_sigma_radius(self.cutoff, scale)
 
         if self.batched_window:
             # take the bounding box of all windows; now the slices
@@ -178,7 +179,7 @@ class Gaussian(object):
     def sigma(self, scale):
         return 0.5 / scale
 
-    def three_sigma_radius(self, scale):
+    def k_sigma_radius(self, k, scale):
         # this isn't correct in multiple dimensions, but it's good enough
-        return 3 * self.sigma(scale)
+        return k * self.sigma(scale)
 

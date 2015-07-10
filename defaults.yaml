@@ -11,4 +11,5 @@ area_dim: 128
 convolutional: False
 learning_rate: 1e-3
 batched_window: True
+cutoff: 3
 plot_url: http://bart2:5006/
