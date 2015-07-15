@@ -121,13 +121,13 @@ def construct_model(task, patch_transform_spec,
                emitter=emitter,
                **hyperparameters)
 
-def construct_monitors(algorithm, task, task_channels, task_plots,
-                       n_patches, x, x_uncentered, hs, locations,
-                       scales, patches, mean_savings, graph, plot_url,
-                       name, model, patchmonitor_interval=100, **kwargs):
+def construct_monitors(algorithm, task, n_patches, x, x_uncentered,
+                       hs, locations, scales, patches, mean_savings,
+                       graph, plot_url, name, model, cost,
+                       patchmonitor_interval=100, **kwargs):
     channels = util.Channels()
     channels.append(util.named(mean_savings.mean(), "mean_savings"))
-    channels.extend(task_channels)
+    channels.extend(task.monitor_channels(graph))
     for i in xrange(n_patches):
         channels.append(hs[:, i].mean(), "h%i_mean" % i)
 
@@ -150,7 +150,7 @@ def construct_monitors(algorithm, task, task_channels, task_plots,
 
     monitors = OrderedDict()
     monitors["train"] = TrainingDataMonitoring(
-        (channels.get_channels() + step_channels),
+        (channels.get_channels() + [cost] + step_channels),
         prefix="train", after_epoch=True)
     for which in "valid test".split():
         monitors[which] = DataStreamMonitoring(
@@ -167,7 +167,7 @@ def construct_monitors(algorithm, task, task_channels, task_plots,
 
     step_plots = [["train_%s" % step_channel.name for step_channel in step_channels]]
     plotter = Plot(name,
-                   channels=(task_plots + step_plots),
+                   channels=(task.plot_channels() + [['train_cost']] + step_plots),
                    after_epoch=True,
                    server_url=plot_url)
 
@@ -188,7 +188,8 @@ def construct_main_loop(name, patch_shape, batch_size,
     model.initialize()
 
     hs, locations, scales, patches, mean_savings = model.compute(x, n_patches)
-    cost = model.emitter.cost(hs[:, -1, :], y)
+    cost = model.emitter.cost(hs, y, n_patches)
+    cost.name = "cost"
 
     # get patches from original (uncentered) images
     patches = T.stack(*[model.attention.crop(x_uncentered, locations[:, i, :], scales[:, i, :])[0]
@@ -198,17 +199,14 @@ def construct_main_loop(name, patch_shape, batch_size,
 
     print "setting up main loop..."
     graph = ComputationGraph(cost)
-    task_channels = task.monitor_channels(graph)
-    task_plots = task.plot_channels()
     uselessflunky = Model(cost)
     algorithm = GradientDescent(cost=cost,
                                 params=graph.parameters,
                                 step_rule=RMSProp(learning_rate=learning_rate))
     monitors = construct_monitors(
-        x=x, x_uncentered=x_uncentered, y=y, hs=hs,
+        x=x, x_uncentered=x_uncentered, y=y, hs=hs, cost=cost,
         locations=locations, scales=scales, patches=patches,
         mean_savings=mean_savings, algorithm=algorithm, task=task,
-        task_channels=task_channels, task_plots=task_plots,
         model=uselessflunky, graph=graph, **hyperparameters)
     main_loop = MainLoop(data_stream=task.datastreams["train"],
                          algorithm=algorithm,

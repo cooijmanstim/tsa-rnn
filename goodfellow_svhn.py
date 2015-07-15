@@ -72,8 +72,8 @@ class Emitter(Initializable):
 
     # some day: @application(...) def feedback(self, h)
 
-    @application(inputs=['h', 'y'])
-    def cost(self, h, y):
+    @application(inputs=['hs', 'y'], outputs=['cost'])
+    def cost(self, hs, y, n_patches):
         max_length = len(self.n_classes) - 1
         _length_masks = theano.shared(
             np.tril(np.ones((max_length, max_length), dtype='int8')),
@@ -81,23 +81,28 @@ class Emitter(Initializable):
         lengths = y[:, -1]
         length_masks = _length_masks[lengths]
 
-        energies = [emitter.apply(h) for emitter in self.emitters]
-        cross_entropies = [util.named(self.softmax.categorical_cross_entropy(y[:, i], energy)
-                                      # to avoid punishing predictions of nonexistent digits:
-                                      * (length_masks[:, i] if i < max_length else 1),
-                                      "cross_entropy_%i" % i)
-                           for i, energy in enumerate(energies)]
-        cross_entropy = util.named(sum(cross_entropies).mean(), "cross_entropy")
-        errors = [util.named(T.neq(y[:, i], energy.argmax(axis=1))
-                             # to avoid punishing predictions of nonexistent digits:
-                             * (length_masks[:, i] if i < max_length else 1),
-                             "error_%i" % i)
-                  for i, energy in enumerate(energies)]
-        error_rate = util.named(T.stack(*errors).any(axis=0).mean(), "error_rate")
-        for variable in it.chain([cross_entropy, error_rate],
-                                 cross_entropies, errors):
-            self.add_auxiliary_variable(variable, name=variable.name)
-        return cross_entropy
+        mean_cross_entropies = []
+        error_rates = []
+        for t in xrange(n_patches):
+            energies = [emitter.apply(hs[:, t, :]) for emitter in self.emitters]
+            mean_cross_entropies.append(
+                sum(self.softmax.categorical_cross_entropy(y[:, i], energy)
+                    # to avoid punishing predictions of nonexistent digits:
+                    * (length_masks[:, i] if i < max_length else 1)
+                    for i, energy in enumerate(energies)).mean())
+            # FIXME: do proper logprob-minimizing prediction of length
+            error_rates.append(
+                T.stack(*[T.neq(y[:, i], energy.argmax(axis=1))
+                          # to avoid punishing predictions of nonexistent digits:
+                          * (length_masks[:, i] if i < max_length else 1)
+                          for i, energy in enumerate(energies)]).any(axis=0).mean())
+
+        self.add_auxiliary_variable(mean_cross_entropies[-1], name="cross_entropy")
+        self.add_auxiliary_variable(error_rates[-1], name="error_rate")
+
+        # minimize the mean cross entropy over time and over batch
+        cost = T.stack(*mean_cross_entropies).mean()
+        return cost
 
 class NumberTask(object):
     def __init__(self, batch_size, hidden_dim, hyperparameters, shrink_dataset_by=1, **kwargs):
