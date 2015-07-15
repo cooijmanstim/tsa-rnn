@@ -1,20 +1,14 @@
 import yaml
-import math
-import sys
 import os
 import operator as op
 from collections import OrderedDict
 
-import numpy as np
 import theano
 import theano.tensor as T
 
-from fuel.datasets import MNIST
-from fuel.schemes import ShuffledScheme, SequentialScheme
-from fuel.streams import DataStream
+from fuel.schemes import SequentialScheme
 
-from blocks.initialization import IsotropicGaussian, Constant, NdarrayInitialization, Orthogonal, Identity
-from blocks.utils import named_copy
+from blocks.initialization import IsotropicGaussian, Constant, Orthogonal, Identity
 from blocks.theano_expressions import l2_norm
 from blocks.serialization import load_parameter_values
 from blocks.model import Model
@@ -23,13 +17,9 @@ from blocks.extensions.monitoring import TrainingDataMonitoring, DataStreamMonit
 from blocks.extensions.saveload import Checkpoint
 from blocks.main_loop import MainLoop
 from blocks.extensions import FinishAfter, Printing, ProgressBar
-from blocks.roles import PARAMETER, OUTPUT, INPUT, DROPOUT
-from blocks.bricks import Softmax, Rectifier, Brick, application, MLP, FeedforwardSequence, Tanh
-from blocks.bricks.recurrent import LSTM, SimpleRecurrent
+from blocks.bricks import Rectifier, MLP, FeedforwardSequence, Tanh
+from blocks.bricks.recurrent import SimpleRecurrent
 from blocks.graph import ComputationGraph
-from blocks.bricks.cost import CategoricalCrossEntropy, MisclassificationRate
-from blocks.main_loop import MainLoop
-from blocks.filter import VariableFilter
 from blocks.extras.extensions.plot import Plot
 from blocks.bricks.conv import ConvolutionalSequence, ConvolutionalLayer, Flattener
 
