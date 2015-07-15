@@ -65,8 +65,12 @@ class Task(object):
 
     def preprocess(self, x):
         print "taking mean"
-        mean = reduce(operator.add,
-                      (batch["features"].mean(axis=0, keepdims=True)
-                       for batch in self.datastreams["train"].get_epoch_iterator(as_dict=True)))
+        mean = 0
+        n = 0
+        for batch in self.datastreams["train"].get_epoch_iterator(as_dict=True):
+            batch_sum = batch["features"].sum(axis=0, keepdims=True)
+            k = batch["features"].shape[0]
+            mean = n/float(n+k) * mean + 1/float(n+k) * batch_sum
+            n += k
         print "mean taken"
         return x - mean
