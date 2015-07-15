@@ -173,9 +173,12 @@ def construct_monitors(algorithm, task, n_patches, x, x_uncentered,
 
     return list(monitors.values()) + [patch_monitoring, plotter]
 
-def construct_main_loop(name, patch_shape, batch_size,
+def construct_main_loop(name, task_name, patch_shape, batch_size,
                         n_spatial_dims, n_patches, n_epochs,
                         learning_rate, hyperparameters, **kwargs):
+    name = "%s_%s" % (name, task_name)
+    hyperparameters["name"] = name
+
     task = get_task(**hyperparameters)
     x_uncentered, y = task.get_variables()
 
