@@ -141,7 +141,7 @@ def construct_monitors(algorithm, task, n_patches, x, x_uncentered,
     step_norms = util.Channels()
     step_norms.extend(util.named(l2_norm([algorithm.steps[param]]),
                                  "step_norm_%s" % name)
-                      for name, param in model.params.items())
+                      for name, param in model.get_parameter_dict().items())
     step_channels = step_norms.get_channels()
     #for activation in VariableFilter(roles=[OUTPUT])(graph.variables):
     #    quantity = activation.mean()
@@ -204,7 +204,7 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
     graph = ComputationGraph(cost)
     uselessflunky = Model(cost)
     algorithm = GradientDescent(cost=cost,
-                                params=graph.parameters,
+                                parameters=graph.parameters,
                                 step_rule=RMSProp(learning_rate=learning_rate))
     monitors = construct_monitors(
         x=x, x_uncentered=x_uncentered, y=y, hs=hs, cost=cost,
@@ -246,9 +246,9 @@ if __name__ == "__main__":
     main_loop = construct_main_loop(**hyperparameters)
 
     if args.parameters:
-        # pickle made with blocks.serialization.dump(model.params)
-        params = load_parameter_values(args.parameters)
-        main_loop.model.set_param_values(params)
+        # pickle made with blocks.serialization.dump(model.get_parameter_dict())
+        parameters = load_parameter_values(args.parameters)
+        main_loop.model.set_parameter_values(parameters)
 
     print "training..."
     main_loop.run()

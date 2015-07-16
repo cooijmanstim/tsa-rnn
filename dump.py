@@ -16,7 +16,7 @@ class Dump(SimpleExtension):
             os.mkdir(self.save_path)
         filename = "params_%i.npz" % self.main_loop.status["epochs_done"]
         with open(os.path.join(self.save_path, filename), "wb") as f:
-            dump(self.main_loop.model.params, f)
+            dump(self.main_loop.model.get_parameter_dict(), f)
 
 class DumpMinimum(SimpleExtension):
     def __init__(self, save_path, channel_name, sign=1, **kwargs):
@@ -40,4 +40,4 @@ class DumpMinimum(SimpleExtension):
             os.mkdir(self.save_path)
         filename = "params_%i.npz" % self.main_loop.status["epochs_done"]
         with open(os.path.join(self.save_path, filename), "wb") as f:
-            dump(self.main_loop.model.params, f)
+            dump(self.main_loop.model.get_parameter_dict(), f)
