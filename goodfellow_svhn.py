@@ -30,11 +30,9 @@ class SVHN(H5PYDataset):
 def fix_representation(data):
     x, y = data
 
-    # grayscale
-    x = x.mean(axis=3, keepdims=True)
+    x /= 255.0
+    x = x.mean(axis=3, keepdims=True) # grayscale
     x = np.rollaxis(x, 3, 1)
-    # standardize and center on zero (TODO: subtract mean)
-    x = (x / 255.0) * 2 - 1
 
     y = np.array(y, copy=True)
     # use zero to represent zero
