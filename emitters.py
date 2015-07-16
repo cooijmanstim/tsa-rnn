@@ -1,6 +1,6 @@
 import theano.tensor as T
 
-from blocks.bricks import Initializable, MLP, Softmax
+from blocks.bricks import Initializable, MLP, Softmax, Rectifier
 from blocks.bricks.base import application
 from blocks.initialization import Orthogonal, Constant
 
@@ -13,8 +13,8 @@ class SingleSoftmax(Initializable):
         self.hidden_dim = hidden_dim
         self.n_classes = n_classes
 
-        self.mlp = MLP(activations=[Softmax()],
-                       dims=[hidden_dim, self.n_classes],
+        self.mlp = MLP(activations=[Rectifier(), Softmax()],
+                       dims=[hidden_dim, hidden_dim/2, self.n_classes],
                        weights_init=Orthogonal(),
                        biases_init=Constant(0))
         self.softmax = Softmax()

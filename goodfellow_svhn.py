@@ -1,6 +1,4 @@
 import os
-import operator
-import itertools as it
 
 import numpy as np
 
@@ -8,16 +6,13 @@ import theano
 import theano.tensor as T
 
 from blocks.initialization import Orthogonal, Constant
-from blocks.bricks import MLP, Softmax, Initializable, Linear
+from blocks.bricks import MLP, Softmax, Initializable, Rectifier, Identity
 from blocks.bricks.base import application
 from blocks.filter import VariableFilter
-from blocks.bricks.cost import CategoricalCrossEntropy, MisclassificationRate
 
 from fuel.transformers import Mapping
 from fuel.streams import DataStream
 from fuel.schemes import ShuffledScheme
-
-import util
 
 from fuel.datasets import H5PYDataset
 
@@ -60,11 +55,11 @@ class Emitter(Initializable):
         self.n_classes = n_classes
 
         # TODO: use TensorLinear or some such
-        self.emitters = [Linear(input_dim=hidden_dim,
-                                output_dim=n,
-                                name="linear_%i" % i,
-                                weights_init=Orthogonal(),
-                                biases_init=Constant(0))
+        self.emitters = [MLP(activations=[Rectifier(), Identity()],
+                             dims=[hidden_dim, hidden_dim/2, n],
+                             name="mlp_%i" % i,
+                             weights_init=Orthogonal(),
+                             biases_init=Constant(0))
                          for i, n in enumerate(self.n_classes)]
         self.softmax = Softmax()
 
