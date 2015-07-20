@@ -3,7 +3,9 @@ import os
 import numpy as np
 
 from blocks.serialization import dump
-from blocks.extensions import SimpleExtension
+from blocks.extensions import SimpleExtension, Printing
+
+import util
 
 class Dump(SimpleExtension):
     def __init__(self, save_path, **kwargs):
@@ -17,6 +19,20 @@ class Dump(SimpleExtension):
         filename = "params_%i.npz" % self.main_loop.status["epochs_done"]
         with open(os.path.join(self.save_path, filename), "wb") as f:
             dump(self.main_loop.model.get_parameter_dict(), f)
+
+class PrintingTo(Printing):
+    def __init__(self, path, **kwargs):
+        super(PrintingTo, self).__init__(**kwargs)
+        self.path = path
+        with open(self.path, "w") as f:
+            f.truncate(0)
+
+    def do(self, *args, **kwargs):
+        with util.StdoutLines() as lines:
+            super(PrintingTo, self).do(*args, **kwargs)
+        with open(self.path, "a") as f:
+            f.write("\n".join(lines))
+            f.write("\n")
 
 class DumpMinimum(SimpleExtension):
     def __init__(self, save_path, channel_name, sign=1, **kwargs):

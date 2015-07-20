@@ -89,3 +89,18 @@ def dict_merge(*dikts):
 def named(x, name):
     x.name = name
     return x
+
+# from http://stackoverflow.com/a/16571630
+from cStringIO import StringIO
+import sys
+
+class StdoutLines(list):
+    def __enter__(self):
+        self._stringio = StringIO()
+        self._stdout = sys.stdout
+        sys.stdout = self._stringio
+        return self
+
+    def __exit__(self, *args):
+        self.extend(self._stringio.getvalue().splitlines())
+        sys.stdout = self._stdout

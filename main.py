@@ -32,7 +32,7 @@ import mnist
 import svhn
 import goodfellow_svhn
 
-from dump import Dump, DumpMinimum
+from dump import Dump, DumpMinimum, PrintingTo
 
 floatX = theano.config.floatX
 
@@ -219,7 +219,8 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
                                       Dump(name+'_dump', every_n_epochs=1),
                                       Checkpoint(name+'_checkpoint.pkl', every_n_epochs=1, on_interrupt=False),
                                       ProgressBar(),
-                                      Printing()]),
+                                      Printing(),
+                                      PrintingTo(name+"_log")]),
                          model=Model(cost))
     return main_loop
 
