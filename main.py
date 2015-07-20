@@ -18,7 +18,7 @@ from blocks.extensions.saveload import Checkpoint
 from blocks.main_loop import MainLoop
 from blocks.extensions import FinishAfter, Printing, ProgressBar
 from blocks.bricks import Rectifier, MLP, FeedforwardSequence, Tanh
-from blocks.bricks.recurrent import SimpleRecurrent
+from blocks.bricks.recurrent import LSTM
 from blocks.graph import ComputationGraph
 from blocks.extras.extensions.plot import Plot
 from blocks.bricks.conv import ConvolutionalSequence, ConvolutionalLayer, Flattener
@@ -40,34 +40,40 @@ class Ram(object):
     def __init__(self, image_shape, patch_shape, patch_transform,
                  patch_postdim, hidden_dim, area_dim, n_spatial_dims,
                  cutoff, batched_window, initargs, emitter, **kwargs):
-        self.locator = masonry.Locator(hidden_dim, area_dim, n_spatial_dims)
+        self.rnn = LSTM(activation=Tanh(),
+                        dim=hidden_dim,
+                        name="recurrent",
+                        weights_init=IsotropicGaussian(1e-4),
+                        biases_init=Constant(0))
+        self.locator = masonry.Locator(hidden_dim, area_dim, n_spatial_dims,
+                                       **initargs)
         self.cropper = crop.LocallySoftRectangularCropper(
             n_spatial_dims=n_spatial_dims,
             image_shape=image_shape, patch_shape=patch_shape,
             kernel=crop.Gaussian(), cutoff=cutoff,
             batched_window=batched_window)
         self.merger = masonry.Merger(
-            n_spatial_dims, patch_postdim, area_dim, hidden_dim,
+            n_spatial_dims, patch_postdim, area_dim, response_dim=self.rnn.get_dim("inputs"),
             patch_posttransform=patch_transform.apply,
             area_posttransform=Rectifier(),
             response_posttransform=Rectifier(),
             **initargs)
         self.attention = masonry.SpatialAttention(self.locator, self.cropper, self.merger)
         self.emitter = emitter
-        self.rnn = SimpleRecurrent(activation=Tanh(),
-                                   dim=hidden_dim,
-                                   weights_init=Identity(),
-                                   biases_init=Constant(0),
-                                   name="recurrent")
         self.model = masonry.RecurrentAttentionModel(
-            self.rnn, self.attention, self.emitter, **initargs)
+            self.rnn, self.attention, self.emitter)
 
     def initialize(self):
         self.model.initialize()
+        Identity().initialize(self.rnn.W_state, self.rnn.rng)
 
     def compute(self, x, n_patches):
         initial_outputs = self.model.compute_initial_state(x)
-        step_outputs = self.model.apply(x=x, h=initial_outputs[0], n_steps=n_patches - 1, batch_size=x.shape[0])
+        step_outputs = self.model.apply(x=x,
+                                        h=initial_outputs[0],
+                                        c=initial_outputs[1],
+                                        n_steps=n_patches - 1,
+                                        batch_size=x.shape[0])
         # prepend initial values
         step_outputs = [T.concatenate([T.shape_padleft(initial_output), step_output], axis=0)
                         for initial_output, step_output in zip(initial_outputs, step_outputs)]
@@ -122,7 +128,7 @@ def construct_model(task, patch_transform_spec,
                **hyperparameters)
 
 def construct_monitors(algorithm, task, n_patches, x, x_uncentered,
-                       hs, locations, scales, patches, mean_savings,
+                       hs, cs, locations, scales, patches, mean_savings,
                        graph, plot_url, name, model, cost,
                        patchmonitor_interval=100, **kwargs):
     channels = util.Channels()
@@ -130,6 +136,8 @@ def construct_monitors(algorithm, task, n_patches, x, x_uncentered,
     channels.extend(task.monitor_channels(graph))
     for i in xrange(n_patches):
         channels.append(hs[:, i].mean(), "h%i_mean" % i)
+    for i in xrange(n_patches):
+        channels.append(cs[:, i].mean(), "c%i_mean" % i)
 
     for variable_name in "locations scales".split():
         variable = locals()[variable_name]
@@ -190,8 +198,8 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
     model = construct_model(task=task, **hyperparameters)
     model.initialize()
 
-    hs, locations, scales, patches, mean_savings = model.compute(x, n_patches)
-    cost = model.emitter.cost(hs, y, n_patches)
+    hs, cs, locations, scales, patches, mean_savings = model.compute(x, n_patches)
+    cost = model.emitter.cost(cs, y, n_patches)
     cost.name = "cost"
 
     # get patches from original (uncentered) images
@@ -207,10 +215,10 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
                                 parameters=graph.parameters,
                                 step_rule=RMSProp(learning_rate=learning_rate))
     monitors = construct_monitors(
-        x=x, x_uncentered=x_uncentered, y=y, hs=hs, cost=cost,
-        locations=locations, scales=scales, patches=patches,
-        mean_savings=mean_savings, algorithm=algorithm, task=task,
-        model=uselessflunky, graph=graph, **hyperparameters)
+        x=x, x_uncentered=x_uncentered, y=y, hs=hs, cs=cs, cost=cost,
+        locations=locations, scales=scales, patches=patches, mean_savings=mean_savings,
+        algorithm=algorithm, task=task, model=uselessflunky,
+        graph=graph, **hyperparameters)
     main_loop = MainLoop(data_stream=task.datastreams["train"],
                          algorithm=algorithm,
                          extensions=(monitors +
@@ -221,7 +229,7 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
                                       ProgressBar(),
                                       Printing(),
                                       PrintingTo(name+"_log")]),
-                         model=Model(cost))
+                         model=uselessflunky)
     return main_loop
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ import theano.tensor as T
 
 from blocks.bricks.base import lazy, application, Brick
 from blocks.bricks.parallel import Fork, Merge
-from blocks.bricks.recurrent import BaseRecurrent, recurrent
+from blocks.bricks.recurrent import BaseRecurrent, recurrent, SimpleRecurrent, LSTM
 from blocks.bricks import Linear, Tanh, Rectifier, Initializable, MLP, Sequence, FeedforwardSequence
 from blocks.bricks.conv import Flattener
 from blocks.initialization import Constant, IsotropicGaussian
@@ -58,10 +58,13 @@ class Merger(Initializable):
         return response
 
 class Locator(Initializable):
-    def __init__(self, input_dim, area_dim, n_spatial_dims, area_posttransform=Rectifier(), **kwargs):
+    def __init__(self, input_dim, area_dim, n_spatial_dims,
+                 weights_init, biases_init, area_posttransform=Rectifier(),
+                 **kwargs):
         super(Locator, self).__init__(**kwargs)
 
-        self.area = MLP(activations=[area_posttransform], dims=[input_dim, area_dim])
+        self.area = MLP(activations=[area_posttransform], dims=[input_dim, area_dim],
+                        weights_init=weights_init, biases_init=biases_init)
 
         # these are huge reductions in dimensionality, so use
         # normalized initialization to avoid huge values.
@@ -94,7 +97,7 @@ def static_map_to_image_space(location, scale, patch_shape, image_shape):
     scale += patch_shape / image_shape
     return location, scale
 
-class SpatialAttention(Initializable):
+class SpatialAttention(Brick):
     def __init__(self, locator, cropper, merger, **kwargs):
         super(SpatialAttention, self).__init__(**kwargs)
 
@@ -135,9 +138,12 @@ class SpatialAttention(Initializable):
         u = self.merger.apply(patch, location, scale)
         return u, location, scale, patch, mean_savings
 
-class RecurrentAttentionModel(BaseRecurrent, Initializable):
+class RecurrentAttentionModel(BaseRecurrent):
     def __init__(self, rnn, attention, emitter, **kwargs):
         super(RecurrentAttentionModel, self).__init__(**kwargs)
+
+        # life's too short to try to reconcile the differences between LSTM and plain RNN interfaces
+        assert isinstance(rnn, LSTM)
 
         self.rnn = rnn
         self.attention = attention
@@ -147,19 +153,21 @@ class RecurrentAttentionModel(BaseRecurrent, Initializable):
 
     def get_dim(self, name):
         try:
-            return dict(h=self.rnn.get_dim("states"))[name]
+            return dict(h=self.rnn.get_dim("states"),
+                        c=self.rnn.get_dim("cells"))[name]
         except KeyError:
             return super(RecurrentAttentionModel, self).get_dim(name)
 
-    @recurrent(sequences=[''], contexts=['x'], states=['h'], outputs=['h', 'location', 'scale', 'patch', 'mean_savings'])
-    def apply(self, x, h):
-        u, location, scale, patch, mean_savings = self.attention.apply(x, h)
-        h = self.rnn.apply(states=h, inputs=u, iterate=False)
-        return h, location, scale, patch, mean_savings
+    @recurrent(sequences=[], contexts=['x'], states="h c".split(),
+               outputs="h c location scale patch mean_savings".split())
+    def apply(self, x, h, c):
+        u, location, scale, patch, mean_savings = self.attention.apply(x, c)
+        h, c = self.rnn.apply(inputs=u, iterate=False, states=h, cells=c)
+        return h, c, location, scale, patch, mean_savings
 
-    @application(inputs=['x'], outputs=['h0', 'location0', 'scale0', 'patch0', 'mean_savings0'])
+    @application(inputs=['x'], outputs="h0 c0 location0 scale0 patch0 mean_savings0".split())
     def compute_initial_state(self, x):
         u, location, scale, patch, mean_savings = self.attention.compute_initial_input(x)
-        h = self.rnn.apply(states=self.rnn.initial_states(state_name="states", batch_size=x.shape[0]),
-                           inputs=u, iterate=False)
-        return h, location, scale, patch, mean_savings
+        h, c = self.rnn.initial_states(x.shape[0])
+        h, c = self.rnn.apply(inputs=u, iterate=False, states=h, cells=c)
+        return h, c, location, scale, patch, mean_savings

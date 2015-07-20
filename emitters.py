@@ -23,9 +23,9 @@ class SingleSoftmax(Initializable):
 
     # some day: @application(...) def feedback(self, h)
 
-    @application(inputs=['hs', 'y'], outputs=['cost'])
-    def cost(self, hs, y, n_patches):
-        energies = [self.mlp.apply(hs[:, t, :])
+    @application(inputs=['cs', 'y'], outputs=['cost'])
+    def cost(self, cs, y, n_patches):
+        energies = [self.mlp.apply(cs[:, t, :])
                     for t in xrange(n_patches)]
         cross_entropies = [self.softmax.categorical_cross_entropy(y.flatten(), energy)
                            for energy in energies]

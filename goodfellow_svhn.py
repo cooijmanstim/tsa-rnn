@@ -65,8 +65,8 @@ class Emitter(Initializable):
 
     # some day: @application(...) def feedback(self, h)
 
-    @application(inputs=['hs', 'y'], outputs=['cost'])
-    def cost(self, hs, y, n_patches):
+    @application(inputs=['cs', 'y'], outputs=['cost'])
+    def cost(self, cs, y, n_patches):
         max_length = len(self.n_classes) - 1
         _length_masks = theano.shared(
             np.tril(np.ones((max_length, max_length), dtype='int8')),
