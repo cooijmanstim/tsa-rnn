@@ -142,9 +142,6 @@ class SoftRectangularCropper(Brick):
             location = locations[:, axis].dimshuffle(0, 'x', 'x')   # (batch_size, 1, 1)
             scale    = scales   [:, axis].dimshuffle(0, 'x', 'x')   # (batch_size, 1, 1)
 
-            # linearly map locations in [-1, 1] into image index space
-            location = (location + 1)/2 * m                         # (batch_size, 1, 1)
-
             # map patch index into image index space
             J = (J - 0.5*n) / scale + location                      # (batch_size, 1, patch_dim)
 
