@@ -165,7 +165,7 @@ class SoftRectangularCropper(Brick):
         patch = image
         for axis, matrix in enumerate(matrices):
             patch = T.batched_tensordot(patch, matrix, [[2], [1]])
-        return patch, 0
+        return patch, T.constant(0)
 
 class Gaussian(object):
     def density(self, x2, scale):
