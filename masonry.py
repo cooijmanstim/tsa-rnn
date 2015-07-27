@@ -119,9 +119,11 @@ class SpatialAttention(Brick):
         scale = T.zeros_like(location)
         return location, scale
 
-    @application(inputs=['x', 'h'], outputs=['u', 'location', 'scale', 'patch', 'mean_savings'])
-    def apply(self, x, h):
+    @application(inputs=['x', 'h', 'location_noise', 'scale_noise'], outputs=['u', 'location', 'scale', 'patch', 'mean_savings'])
+    def apply(self, x, h, location_noise, scale_noise):
         location, scale = self.locator.apply(h)
+        location += location_noise
+        scale += scale_noise
         patch, mean_savings = self.crop(x, location, scale)
         u = self.merger.apply(patch, location, scale)
         return u, location, scale, patch, mean_savings
@@ -158,10 +160,10 @@ class RecurrentAttentionModel(BaseRecurrent):
         except KeyError:
             return super(RecurrentAttentionModel, self).get_dim(name)
 
-    @recurrent(sequences=[], contexts=['x'], states="h c".split(),
+    @recurrent(sequences=["location_noises", "scale_noises"], contexts=['x'], states="h c".split(),
                outputs="h c location scale patch mean_savings".split())
-    def apply(self, x, h, c):
-        u, location, scale, patch, mean_savings = self.attention.apply(x, c)
+    def apply(self, x, h, c, location_noises, scale_noises):
+        u, location, scale, patch, mean_savings = self.attention.apply(x, c, location_noises, scale_noises)
         h, c = self.rnn.apply(inputs=u, iterate=False, states=h, cells=c)
         return h, c, location, scale, patch, mean_savings
 

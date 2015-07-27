@@ -5,6 +5,7 @@ from collections import OrderedDict
 
 import theano
 import theano.tensor as T
+import theano.sandbox.rng_mrg
 
 from fuel.schemes import SequentialScheme
 
@@ -39,7 +40,11 @@ floatX = theano.config.floatX
 class Ram(object):
     def __init__(self, image_shape, patch_shape, patch_transform,
                  patch_postdim, hidden_dim, area_dim, n_spatial_dims,
-                 cutoff, batched_window, initargs, emitter, **kwargs):
+                 location_std, scale_std, cutoff, batched_window,
+                 initargs, emitter, **kwargs):
+        self.rng = theano.sandbox.rng_mrg.MRG_RandomStreams(12345)
+        self.location_std = location_std
+        self.scale_std = scale_std
         self.rnn = LSTM(activation=Tanh(),
                         dim=hidden_dim,
                         name="recurrent",
@@ -69,11 +74,18 @@ class Ram(object):
 
     def compute(self, x, n_patches):
         initial_outputs = self.model.compute_initial_state(x)
+        n_steps = n_patches - 1
+        location_noises = self.rng.normal(
+            [n_steps, initial_outputs[2].shape[0], initial_outputs[2].shape[1]],
+            std=self.location_std)
+        scale_noises = self.rng.normal(
+            [n_steps, initial_outputs[3].shape[0], initial_outputs[3].shape[1]],
+            std=self.scale_std)
         step_outputs = self.model.apply(x=x,
                                         h=initial_outputs[0],
                                         c=initial_outputs[1],
-                                        n_steps=n_patches - 1,
-                                        batch_size=x.shape[0])
+                                        location_noises=location_noises,
+                                        scale_noises=scale_noises)
         # prepend initial values
         step_outputs = [T.concatenate([T.shape_padleft(initial_output), step_output], axis=0)
                         for initial_output, step_output in zip(initial_outputs, step_outputs)]
