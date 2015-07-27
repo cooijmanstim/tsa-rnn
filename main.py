@@ -170,11 +170,11 @@ def construct_monitors(algorithm, task, n_patches, x, x_uncentered,
 
     monitors = OrderedDict()
     monitors["train"] = TrainingDataMonitoring(
-        (channels.get_channels() + [cost] + step_channels),
+        step_channels,
         prefix="train", after_epoch=True)
-    for which in "valid test".split():
+    for which in "train valid test".split():
         monitors[which] = DataStreamMonitoring(
-            channels.get_channels(),
+            (channels.get_channels() + [cost]),
             data_stream=task.datastreams[which],
             prefix=which, after_epoch=True)
 
