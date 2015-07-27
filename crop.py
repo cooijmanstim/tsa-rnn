@@ -111,7 +111,7 @@ class LocallySoftRectangularCropper(Brick):
         matrices = self.compute_crop_matrices(location, scale, slices)
         patch = hardcrop
         for axis, matrix in enumerate(matrices):
-            patch = T.batched_tensordot(patch, matrix, [[2], [1]])
+            patch = util.batched_tensordot(patch, matrix, [[2], [1]])
         return patch
 
 class SoftRectangularCropper(Brick):
@@ -164,7 +164,7 @@ class SoftRectangularCropper(Brick):
         matrices = self.compute_crop_matrices(location, scale)
         patch = image
         for axis, matrix in enumerate(matrices):
-            patch = T.batched_tensordot(patch, matrix, [[2], [1]])
+            patch = util.batched_tensordot(patch, matrix, [[2], [1]])
         return patch, T.constant(0)
 
 class Gaussian(object):
