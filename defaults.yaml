@@ -7,7 +7,7 @@ hidden_dim: 256
 n_patches: 8
 patch_shape: [8, 8]
 patch_transform_spec:
-#    convolutional:
+#    cnn:
 #        - border_mode: full
 #          filter_size: [4, 4]
 #          num_filters: 32

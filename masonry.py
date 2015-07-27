@@ -1,3 +1,5 @@
+import operator
+
 import numpy as np
 
 import theano
@@ -7,7 +9,7 @@ from blocks.bricks.base import lazy, application, Brick
 from blocks.bricks.parallel import Fork, Merge
 from blocks.bricks.recurrent import BaseRecurrent, recurrent, SimpleRecurrent, LSTM
 from blocks.bricks import Linear, Tanh, Rectifier, Initializable, MLP, Sequence, FeedforwardSequence
-from blocks.bricks.conv import Flattener
+from blocks.bricks.conv import ConvolutionalSequence, ConvolutionalLayer, Flattener
 from blocks.initialization import Constant, IsotropicGaussian
 
 from util import NormalizedInitialization
@@ -173,3 +175,27 @@ class RecurrentAttentionModel(BaseRecurrent):
         h, c = self.rnn.initial_states(x.shape[0])
         h, c = self.rnn.apply(inputs=u, iterate=False, states=h, cells=c)
         return h, c, location, scale, patch, mean_savings
+
+def construct_cnn(layer_specs, n_channels, input_shape, **kwargs):
+    transform = ConvolutionalSequence(
+        layers=[ConvolutionalLayer(activation=Rectifier().apply,
+                                   name="patch_conv_%i" % i,
+                                   **layer_spec)
+                for i, layer_spec in enumerate(layer_specs)],
+        num_channels=n_channels,
+        image_size=tuple(input_shape),
+        weights_init=IsotropicGaussian(std=1e-8),
+        biases_init=Constant(0))
+    transform.push_allocation_config()
+    # ConvolutionalSequence doesn't provide output_dim
+    output_dim = reduce(operator.mul, transform.get_dim("output"))
+    return transform, output_dim
+
+def construct_mlp(hidden_dims, input_dim, initargs, **kwargs):
+    dims = [input_dim] + hidden_dims
+    activations = [Rectifier() for i in xrange(len(hidden_dims))]
+    transform = FeedforwardSequence([Flattener().apply,
+                                     MLP(activations=activations,
+                                         dims=dims,
+                                         **initargs).apply])
+    return transform, transform.output_dim

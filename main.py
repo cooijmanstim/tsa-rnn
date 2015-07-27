@@ -18,11 +18,10 @@ from blocks.extensions.monitoring import TrainingDataMonitoring, DataStreamMonit
 from blocks.extensions.saveload import Checkpoint
 from blocks.main_loop import MainLoop
 from blocks.extensions import FinishAfter, Printing, ProgressBar
-from blocks.bricks import Rectifier, MLP, FeedforwardSequence, Tanh
+from blocks.bricks import Rectifier, Tanh
 from blocks.bricks.recurrent import LSTM
 from blocks.graph import ComputationGraph
 from blocks.extras.extensions.plot import Plot
-from blocks.bricks.conv import ConvolutionalSequence, ConvolutionalLayer, Flattener
 
 import masonry
 import crop
@@ -106,31 +105,16 @@ def get_task(task_name, hyperparameters, **kwargs):
 def construct_model(task, patch_transform_spec,
                     patch_shape, initargs, n_channels,
                     hyperparameters, **kwargs):
-    patch_dim = n_channels * reduce(op.mul, patch_shape)
-
-    if patch_transform_spec.get("convolutional"):
-        layer_specs = patch_transform_spec["convolutional"]
-        patch_transform = ConvolutionalSequence(
-            layers=[ConvolutionalLayer(activation=Rectifier().apply,
-                                       name="patch_conv_%i" % i,
-                                       **layer_spec)
-                    for i, layer_spec in enumerate(layer_specs)],
-            num_channels=n_channels,
-            image_size=tuple(patch_shape),
-            weights_init=IsotropicGaussian(std=1e-8),
-            biases_init=Constant(0))
-        patch_transform.push_allocation_config()
-        # ConvolutionalSequence doesn't provide output_dim
-        patch_postdim = reduce(op.mul, patch_transform.get_dim("output"))
-    elif patch_transform_spec.get("mlp"):
-        hidden_dims = patch_transform_spec.get("mlp")
-        activations = [Rectifier() for i in xrange(len(hidden_dims))]
-        dims = [patch_dim] + hidden_dims
-        patch_transform = FeedforwardSequence([Flattener().apply,
-                                               MLP(activations=activations,
-                                                   dims=dims,
-                                                   **initargs).apply])
-        patch_postdim = patch_transform.output_dim
+    if "cnn" in patch_transform_spec:
+        patch_transform, patch_postdim = masonry.construct_cnn(
+            patch_transform_spec["cnn"],
+            input_shape=patch_shape,
+            **hyperparameters)
+    elif "mlp" in patch_transform_spec:
+        patch_transform, patch_postdim = masonry.construct_mlp(
+            patch_transform_spec["mlp"],
+            input_dim=n_channels * reduce(op.mul, patch_shape),
+            **hyperparameters)
 
     emitter = task.get_emitter(**hyperparameters)
 
