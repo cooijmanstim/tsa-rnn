@@ -37,8 +37,8 @@ floatX = theano.config.floatX
 
 class Ram(object):
     def __init__(self, image_shape, patch_shape, hidden_dim,
-                 n_spatial_dims, patch_transform,
-                 prefork_area_transform, postmerge_area_transform,
+                 n_spatial_dims, whatwhere_interaction, prefork_area_transform,
+                 postmerge_area_transform, patch_transform,
                  response_transform, location_std, scale_std, cutoff,
                  batched_window, initargs, emitter, **kwargs):
         self.rng = theano.sandbox.rng_mrg.MRG_RandomStreams(12345)
@@ -62,6 +62,7 @@ class Ram(object):
             area_transform=postmerge_area_transform,
             response_transform=response_transform,
             n_spatial_dims=n_spatial_dims,
+            whatwhere_interaction=whatwhere_interaction,
             **initargs)
         self.attention = masonry.SpatialAttention(self.locator, self.cropper, self.merger)
         self.emitter = emitter

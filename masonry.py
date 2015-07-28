@@ -4,7 +4,7 @@ import theano
 import theano.tensor as T
 
 from blocks.bricks.base import application, Brick
-from blocks.bricks.parallel import Fork, Merge
+from blocks.bricks.parallel import Fork, Merge, Parallel
 from blocks.bricks.recurrent import BaseRecurrent, recurrent, LSTM
 from blocks.bricks import Linear, Rectifier, Initializable, MLP, FeedforwardSequence, Feedforward
 from blocks.bricks.conv import ConvolutionalSequence, ConvolutionalLayer, Flattener
@@ -16,7 +16,7 @@ floatX = theano.config.floatX
 
 class Merger(Initializable):
     def __init__(self, area_transform, patch_transform, response_transform,
-                 n_spatial_dims, **kwargs):
+                 n_spatial_dims, whatwhere_interaction="additive", **kwargs):
         super(Merger, self).__init__(**kwargs)
 
         self.rectifier = Rectifier()
@@ -30,12 +30,16 @@ class Merger(Initializable):
         self.area_merge.children[0].use_bias = True
         self.area_transform = area_transform
 
-        self.response_merge = Merge(input_names="area patch".split(),
-                                    input_dims=[area_transform.brick.output_dim,
-                                                patch_transform.brick.output_dim],
-                                    output_dim=response_transform.brick.input_dim,
-                                    child_prefix="response_merge")
-        self.response_merge.children[0].use_bias = True
+        self.whatwhere_interaction = whatwhere_interaction
+        self.response_merge = Parallel(
+            input_names="area patch".split(),
+            input_dims=[area_transform.brick.output_dim,
+                        patch_transform.brick.output_dim],
+            output_dims=2*[response_transform.brick.input_dim],
+            prototype=Linear(use_bias=False),
+            child_prefix="response_merge")
+        if self.whatwhere_interaction == "additive":
+            self.response_merge.children[0].use_bias = True
         self.response_transform = response_transform
 
         self.children = [self.rectifier, self.area_merge, self.response_merge,
@@ -53,8 +57,11 @@ class Merger(Initializable):
         area = self.area_merge.apply(location, scale)
         area = self.rectifier.apply(area)
         area = self.area_transform(area)
-        response = self.response_merge.apply(area, patch)
-        response = self.rectifier.apply(response)
+        parts = self.response_merge.apply(area, patch)
+        if self.whatwhere_interaction == "additive":
+            response = self.rectifier.apply(sum(parts))
+        elif self.whatwhere_interaction == "multiplicative":
+            response = reduce(operator.mul, parts)
         response = self.response_transform(response)
         return response
 
