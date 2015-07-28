@@ -37,10 +37,11 @@ from dump import Dump, DumpMinimum, PrintingTo
 floatX = theano.config.floatX
 
 class Ram(object):
-    def __init__(self, image_shape, patch_shape, hidden_dim, n_spatial_dims,
-                 patch_transform, area_transform, response_transform,
-                 location_std, scale_std, cutoff, batched_window,
-                 initargs, emitter, **kwargs):
+    def __init__(self, image_shape, patch_shape, hidden_dim,
+                 n_spatial_dims, patch_transform,
+                 prefork_area_transform, postmerge_area_transform,
+                 response_transform, location_std, scale_std, cutoff,
+                 batched_window, initargs, emitter, **kwargs):
         self.rng = theano.sandbox.rng_mrg.MRG_RandomStreams(12345)
         self.location_std = location_std
         self.scale_std = scale_std
@@ -49,7 +50,8 @@ class Ram(object):
                         name="recurrent",
                         weights_init=IsotropicGaussian(1e-4),
                         biases_init=Constant(0))
-        self.locator = masonry.Locator(hidden_dim, n_spatial_dims, area_transform,
+        self.locator = masonry.Locator(hidden_dim, n_spatial_dims,
+                                       area_transform=prefork_area_transform,
                                        **initargs)
         self.cropper = crop.LocallySoftRectangularCropper(
             n_spatial_dims=n_spatial_dims,
@@ -58,7 +60,7 @@ class Ram(object):
             batched_window=batched_window)
         self.merger = masonry.Merger(
             patch_transform=patch_transform,
-            area_transform=area_transform,
+            area_transform=postmerge_area_transform,
             response_transform=response_transform,
             n_spatial_dims=n_spatial_dims,
             **initargs)
@@ -103,42 +105,53 @@ def get_task(task_name, hyperparameters, **kwargs):
     return klass(**hyperparameters)
 
 def construct_model(task, patch_shape, initargs, n_channels, hidden_dim,
-                    area_mlp_spec, response_mlp_spec, hyperparameters,
-                    patch_cnn_spec=None, patch_mlp_spec=None,
+                    hyperparameters, patch_cnn_spec=None, patch_mlp_spec=None,
+                    prefork_area_mlp_spec=[], postmerge_area_mlp_spec=[], response_mlp_spec=[],
                     **kwargs):
     patch_transforms = []
     if patch_cnn_spec:
         patch_transforms.append(masonry.construct_cnn(
-            patch_cnn_spec,
+            name="patch_cnn",
+            layer_specs=patch_cnn_spec,
             input_shape=patch_shape,
-            **hyperparameters).apply)
+            n_channels=n_channels).apply)
         shape = patch_transforms[-1].brick.get_dim("output")
     else:
         shape = (n_channels,) + tuple(patch_shape)
     patch_transforms.append(masonry.FeedforwardFlattener(input_shape=shape).apply)
     if patch_mlp_spec:
         patch_transforms.append(masonry.construct_mlp(
+            name="patch_mlp",
             hidden_dims=patch_mlp_spec,
             input_dim=patch_transforms[-1].brick.output_dim,
-            **hyperparameters).apply)
+            initargs=initargs).apply)
     patch_transform = FeedforwardSequence(patch_transforms)
 
-    area_transform = masonry.construct_mlp(
-        area_mlp_spec[1:],
-        input_dim=area_mlp_spec[0],
-        **hyperparameters)
+    prefork_area_transform = masonry.construct_mlp(
+        name="prefork_area_mlp",
+        hidden_dims=prefork_area_mlp_spec[1:],
+        input_dim=prefork_area_mlp_spec[0],
+        initargs=initargs)
+
+    postmerge_area_transform = masonry.construct_mlp(
+        name="postmerge_area_mlp",
+        hidden_dims=postmerge_area_mlp_spec[1:],
+        input_dim=postmerge_area_mlp_spec[0],
+        initargs=initargs)
 
     # LSTM requires the input to have dim=4*hidden_dim
     response_mlp_spec.append(4*hidden_dim)
     response_transform = masonry.construct_mlp(
-        response_mlp_spec[1:],
+        name="response_mlp",
+        hidden_dims=response_mlp_spec[1:],
         input_dim=response_mlp_spec[0],
-        **hyperparameters)
+        initargs=initargs)
 
     emitter = task.get_emitter(**hyperparameters)
 
     return Ram(patch_transform=patch_transform.apply,
-               area_transform=area_transform.apply,
+               prefork_area_transform=prefork_area_transform.apply,
+               postmerge_area_transform=postmerge_area_transform.apply,
                response_transform=response_transform.apply,
                emitter=emitter,
                **hyperparameters)

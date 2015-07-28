@@ -181,8 +181,9 @@ class RecurrentAttentionModel(BaseRecurrent):
         h, c = self.rnn.apply(inputs=u, iterate=False, states=h, cells=c)
         return h, c, location, scale, patch, mean_savings
 
-def construct_cnn(layer_specs, n_channels, input_shape, **kwargs):
+def construct_cnn(name, layer_specs, n_channels, input_shape):
     cnn = ConvolutionalSequence(
+        name=name,
         layers=[ConvolutionalLayer(activation=Rectifier().apply,
                                    name="patch_conv_%i" % i,
                                    **layer_spec)
@@ -195,12 +196,13 @@ def construct_cnn(layer_specs, n_channels, input_shape, **kwargs):
     cnn.push_allocation_config()
     return cnn
 
-def construct_mlp(hidden_dims, input_dim, initargs, **kwargs):
+def construct_mlp(name, hidden_dims, input_dim, initargs):
     if not hidden_dims:
         return FeedforwardIdentity(dim=input_dim)
     dims = [input_dim] + hidden_dims
     activations = [Rectifier() for i in xrange(len(hidden_dims))]
-    mlp = MLP(activations=activations,
+    mlp = MLP(name=name,
+              activations=activations,
               dims=dims,
               **initargs)
     return mlp

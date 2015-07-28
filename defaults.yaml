@@ -14,7 +14,8 @@ patch_shape: [8, 8]
 #      filter_size: [4, 4]
 #      num_filters: 32
 patch_mlp_spec: [128]
-area_mlp_spec: [64]
+prefork_area_mlp_spec: [64]
+postmerge_area_mlp_spec: [64]
 # a final layer with dim=4*hidden_dim will be added to response_mlp_spec to comply with the LSTM interface
 response_mlp_spec: []
 learning_rate: 0.0001
