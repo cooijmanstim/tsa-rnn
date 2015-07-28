@@ -1,7 +1,5 @@
 import yaml
 import os
-import operator as op
-from collections import OrderedDict
 
 import theano
 import theano.tensor as T
@@ -29,6 +27,7 @@ import util
 from patchmonitor import PatchMonitoring
 
 import mnist
+import mnist_cluttered
 import svhn
 import goodfellow_svhn
 
@@ -100,6 +99,7 @@ class Ram(object):
 
 def get_task(task_name, hyperparameters, **kwargs):
     klass = dict(mnist=mnist.Task,
+                 mnist_cluttered=mnist_cluttered.Task,
                  svhn_digit=svhn.DigitTask,
                  svhn_number=goodfellow_svhn.NumberTask)[task_name]
     return klass(**hyperparameters)
@@ -216,6 +216,8 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
     hyperparameters["name"] = name
 
     task = get_task(**hyperparameters)
+    hyperparameters["n_channels"] = task.n_channels
+
     x_uncentered, y = task.get_variables()
 
     x = task.preprocess(x_uncentered)

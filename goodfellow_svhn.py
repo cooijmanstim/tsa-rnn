@@ -11,10 +11,9 @@ from blocks.bricks.base import application
 from blocks.filter import VariableFilter
 
 from fuel.transformers import Mapping
-from fuel.streams import DataStream
-from fuel.schemes import ShuffledScheme
-
 from fuel.datasets import H5PYDataset
+
+import tasks
 
 class SVHN(H5PYDataset):
     def __init__(self, **kwargs):
@@ -97,45 +96,22 @@ class Emitter(Initializable):
         cost = T.stack(*mean_cross_entropies).mean()
         return cost
 
-class NumberTask(object):
-    def __init__(self, batch_size, hidden_dim, hyperparameters, shrink_dataset_by=1, **kwargs):
-        self.shrink_dataset_by = shrink_dataset_by
-        self.batch_size = batch_size
+class NumberTask(tasks.Classification):
+    def __init__(self, *args, **kwargs):
+        super(NumberTask, self).__init__(*args, **kwargs)
         self.max_length = 5
         self.n_classes = [10,] * self.max_length + [self.max_length]
         self.n_channels = 1
-        hyperparameters["n_channels"] = self.n_channels
-        self.datasets = dict(
+
+    def load_datasets(self):
+        return dict(
             train=SVHN(which_sets=["train"]),
             valid=SVHN(which_sets=["valid"]),
             test=SVHN(which_sets=["test"]))
 
-    def get_stream(self, which_set, scheme=None):
-        if not scheme:
-            scheme = ShuffledScheme(
-                self.datasets[which_set].num_examples
-                / self.shrink_dataset_by,
-                self.batch_size)
-        return Mapping(
-            data_stream=DataStream.default_stream(
-                dataset=self.datasets[which_set],
-                iteration_scheme=scheme),
-            mapping=fix_representation)
-
-    def get_variables(self):
-        # shape (batch, channel, height, width)
-        x = T.tensor4('features', dtype=theano.config.floatX)
-        # shape (batch_size, n_classes)
-        y = T.lmatrix('targets')
-
-        theano.config.compute_test_value = 'warn'
-        test_batch_size = 7
-        x.tag.test_value = np.random.random((test_batch_size, self.n_channels, 64, 64)).astype("float32")
-        y.tag.test_value = np.concatenate([np.random.random_integers(0, n-1, (test_batch_size, 1))
-                                           for n in self.n_classes],
-                                          axis=1)
-
-        return x, y
+    def get_stream(self, *args, **kwargs):
+        return Mapping(super(NumberTask, self).get_stream(*args, **kwargs),
+                       mapping=fix_representation)
 
     def get_emitter(self, hidden_dim, **kwargs):
         return Emitter(hidden_dim, self.n_classes)
@@ -147,15 +123,3 @@ class NumberTask(object):
     def plot_channels(self):
         return [["%s_%s" % (which_set, name) for which_set in self.datasets.keys()]
                 for name in "cross_entropy error_rate".split()]
-
-    def preprocess(self, x):
-        print "taking mean"
-        mean = 0
-        n = 0
-        for batch in self.get_stream("train").get_epoch_iterator(as_dict=True):
-            batch_sum = batch["features"].sum(axis=0, keepdims=True)
-            k = batch["features"].shape[0]
-            mean = n/float(n+k) * mean + 1/float(n+k) * batch_sum
-            n += k
-        print "mean taken"
-        return x - mean
