@@ -77,7 +77,7 @@ class Emitter(Initializable):
         mean_cross_entropies = []
         error_rates = []
         for t in xrange(n_patches):
-            energies = [emitter.apply(hs[:, t, :]) for emitter in self.emitters]
+            energies = [emitter.apply(cs[:, t, :]) for emitter in self.emitters]
             mean_cross_entropies.append(
                 sum(self.softmax.categorical_cross_entropy(y[:, i], energy)
                     # to avoid punishing predictions of nonexistent digits:
