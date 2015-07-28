@@ -22,6 +22,8 @@ def fix_target_representation(data):
     
 class DigitTask(object):
     def __init__(self, batch_size, hidden_dim, hyperparameters, shrink_dataset_by=1, **kwargs):
+        self.shrink_dataset_by = shrink_dataset_by
+        self.batch_size = batch_size
         self.n_classes = 10
         self.n_channels = 3
         hyperparameters["n_channels"] = self.n_channels
@@ -29,14 +31,13 @@ class DigitTask(object):
             train=SVHN(which_sets=["train"], which_format=2, subset=slice(None, 50000)),
             valid=SVHN(which_sets=["train"], which_format=2, subset=slice(50000, None)),
             test=SVHN(which_sets=["test"], which_format=2))
-        self.datastreams = dict(
-            (which,
-             self.get_stream(which,
-                             ShuffledScheme(dataset.num_examples / shrink_dataset_by,
-                                            batch_size)))
-            for which, dataset in self.datasets.items())
 
-    def get_stream(self, which_set, scheme):
+    def get_stream(self, which_set, scheme=None):
+        if not scheme:
+            scheme = ShuffledScheme(
+                self.datasets[which_set].num_examples
+                / self.shrink_dataset_by,
+                self.batch_size)
         return Mapping(
             data_stream=DataStream.default_stream(
                 dataset=self.datasets[which_set],
@@ -70,7 +71,7 @@ class DigitTask(object):
         print "taking mean"
         mean = 0
         n = 0
-        for batch in self.datastreams["train"].get_epoch_iterator(as_dict=True):
+        for batch in self.get_stream("train").get_epoch_iterator(as_dict=True):
             batch_sum = batch["features"].sum(axis=0, keepdims=True)
             k = batch["features"].shape[0]
             mean = n/float(n+k) * mean + 1/float(n+k) * batch_sum

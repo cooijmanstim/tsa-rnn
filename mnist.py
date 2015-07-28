@@ -17,6 +17,8 @@ import emitters
 
 class Task(object):
     def __init__(self, batch_size, hidden_dim, hyperparameters, shrink_dataset_by=1, **kwargs):
+        self.shrink_dataset_by = shrink_dataset_by
+        self.batch_size = batch_size
         self.n_classes = 10
         self.n_channels = 1
         hyperparameters["n_channels"] = self.n_channels
@@ -24,18 +26,17 @@ class Task(object):
             train=MNIST(which_sets=["train"], subset=slice(None, 50000)),
             valid=MNIST(which_sets=["train"], subset=slice(50000, None)),
             test=MNIST(which_sets=["test"]))
-        self.datastreams = dict(
-            (which,
-             self.get_stream(which,
-                             ShuffledScheme(dataset.num_examples / shrink_dataset_by,
-                                            batch_size)))
-            for which, dataset in self.datasets.items())
         self.emitter = MLP(activations=[Softmax()],
                            dims=[hidden_dim, self.n_classes],
                            weights_init=Orthogonal(),
                            biases_init=Constant(0))
 
-    def get_stream(self, which_set, scheme):
+    def get_stream(self, which_set, scheme=None):
+        if not scheme:
+            scheme = ShuffledScheme(
+                self.datasets[which_set].num_examples
+                / self.shrink_dataset_by,
+                self.batch_size)
         return DataStream.default_stream(
             dataset=self.datasets[which_set],
             iteration_scheme=scheme)
@@ -67,7 +68,7 @@ class Task(object):
         print "taking mean"
         mean = 0
         n = 0
-        for batch in self.datastreams["train"].get_epoch_iterator(as_dict=True):
+        for batch in self.get_stream("train").get_epoch_iterator(as_dict=True):
             batch_sum = batch["features"].sum(axis=0, keepdims=True)
             k = batch["features"].shape[0]
             mean = n/float(n+k) * mean + 1/float(n+k) * batch_sum

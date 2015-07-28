@@ -179,7 +179,7 @@ def construct_monitors(algorithm, task, n_patches, x, x_uncentered,
     for which in "train valid test".split():
         monitors[which] = DataStreamMonitoring(
             (channels.get_channels() + [cost]),
-            data_stream=task.datastreams[which],
+            data_stream=task.get_stream(which),
             prefix=which, after_epoch=True)
 
     patch_monitoring = PatchMonitoring(
@@ -235,7 +235,7 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
         locations=locations, scales=scales, patches=patches, mean_savings=mean_savings,
         algorithm=algorithm, task=task, model=uselessflunky,
         graph=graph, **hyperparameters)
-    main_loop = MainLoop(data_stream=task.datastreams["train"],
+    main_loop = MainLoop(data_stream=task.get_stream("train"),
                          algorithm=algorithm,
                          extensions=(monitors +
                                      [FinishAfter(after_n_epochs=n_epochs),
