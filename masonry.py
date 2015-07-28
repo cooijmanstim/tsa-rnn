@@ -188,12 +188,18 @@ class RecurrentAttentionModel(BaseRecurrent):
         h, c = self.rnn.apply(inputs=u, iterate=False, states=h, cells=c)
         return h, c, location, scale, patch, mean_savings
 
+def construct_cnn_layer(name, layer_spec):
+    for key in "filter_size conv_step pooling_size pooling_step".split():
+        layer_spec.setdefault(key, (1, 1))
+    return ConvolutionalLayer(name=name,
+                              activation=Rectifier().apply,
+                              **layer_spec)
+
 def construct_cnn(name, layer_specs, n_channels, input_shape):
     cnn = ConvolutionalSequence(
         name=name,
-        layers=[ConvolutionalLayer(activation=Rectifier().apply,
-                                   name="patch_conv_%i" % i,
-                                   **layer_spec)
+        layers=[construct_cnn_layer("patch_conv_%i" % i,
+                                    layer_spec)
                 for i, layer_spec in enumerate(layer_specs)],
         num_channels=n_channels,
         image_size=tuple(input_shape),
