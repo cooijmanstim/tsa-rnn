@@ -1,14 +1,12 @@
 import operator
 
-import numpy as np
-
 import theano
 import theano.tensor as T
 
-from blocks.bricks.base import lazy, application, Brick
+from blocks.bricks.base import application, Brick
 from blocks.bricks.parallel import Fork, Merge
-from blocks.bricks.recurrent import BaseRecurrent, recurrent, SimpleRecurrent, LSTM
-from blocks.bricks import Linear, Tanh, Rectifier, Initializable, MLP, Sequence, FeedforwardSequence
+from blocks.bricks.recurrent import BaseRecurrent, recurrent, LSTM
+from blocks.bricks import Linear, Rectifier, Initializable, MLP, FeedforwardSequence, Feedforward
 from blocks.bricks.conv import ConvolutionalSequence, ConvolutionalLayer, Flattener
 from blocks.initialization import Constant, IsotropicGaussian
 
@@ -17,34 +15,33 @@ from util import NormalizedInitialization
 floatX = theano.config.floatX
 
 class Merger(Initializable):
-    def __init__(self, n_spatial_dims, patch_postdim, area_dim, response_dim,
-                 patch_posttransform=None,
-                 area_pretransform=None, response_pretransform=None,
-                 area_posttransform=None, response_posttransform=None,
-                 **kwargs):
+    def __init__(self, area_transform, patch_transform, response_transform,
+                 n_spatial_dims, **kwargs):
         super(Merger, self).__init__(**kwargs)
 
-        self.patch_posttransform = FeedforwardSequence([patch_posttransform, Flattener().apply])
+        self.rectifier = Rectifier()
 
-        self.area = Merge(input_names="location scale".split(),
-                          input_dims=[n_spatial_dims, n_spatial_dims],
-                          output_dim=area_dim,
-                          prototype=area_pretransform,
-                          child_prefix="merger_area")
-        self.area.children[0].use_bias = True
-        self.area_posttransform = area_posttransform
+        self.patch_transform = patch_transform
 
-        self.response = Merge(input_names="area patch".split(),
-                              input_dims=[self.area.output_dim,
-                                          patch_postdim],
-                              output_dim=response_dim,
-                              prototype=response_pretransform,
-                              child_prefix="merger_response")
-        self.response.children[0].use_bias = True
-        self.response_posttransform = response_posttransform
+        self.area_merge = Merge(input_names="location scale".split(),
+                                input_dims=[n_spatial_dims, n_spatial_dims],
+                                output_dim=area_transform.brick.input_dim,
+                                child_prefix="area_merge")
+        self.area_merge.children[0].use_bias = True
+        self.area_transform = area_transform
 
-        self.children = [self.area, self.response, self.patch_posttransform,
-                         self.area_posttransform, self.response_posttransform]
+        self.response_merge = Merge(input_names="area patch".split(),
+                                    input_dims=[area_transform.brick.output_dim,
+                                                patch_transform.brick.output_dim],
+                                    output_dim=response_transform.brick.input_dim,
+                                    child_prefix="response_merge")
+        self.response_merge.children[0].use_bias = True
+        self.response_transform = response_transform
+
+        self.children = [self.rectifier, self.area_merge, self.response_merge,
+                         patch_transform.brick,
+                         area_transform.brick,
+                         response_transform.brick]
 
     @application(inputs="patch location scale".split(),
                  outputs=['response'])
@@ -52,38 +49,46 @@ class Merger(Initializable):
         # don't backpropagate through these to avoid the model using
         # the location/scale as merely additional hidden units
         #location, scale = list(map(theano.gradient.disconnected_grad, (location, scale)))
-        patch = self.patch_posttransform.apply(patch)
-        area = self.area.apply(location, scale)
-        area = self.area_posttransform.apply(area)
-        response = self.response.apply(area, patch)
-        response = self.response_posttransform.apply(response)
+        patch = self.patch_transform(patch)
+        area = self.area_merge.apply(location, scale)
+        area = self.rectifier.apply(area)
+        area = self.area_transform(area)
+        response = self.response_merge.apply(area, patch)
+        response = self.rectifier.apply(response)
+        response = self.response_transform(response)
         return response
 
 class Locator(Initializable):
-    def __init__(self, input_dim, area_dim, n_spatial_dims,
-                 weights_init, biases_init, area_posttransform=Rectifier(),
-                 **kwargs):
+    def __init__(self, input_dim, n_spatial_dims, area_transform,
+                 weights_init, biases_init, **kwargs):
         super(Locator, self).__init__(**kwargs)
 
-        self.area = MLP(activations=[area_posttransform], dims=[input_dim, area_dim],
-                        weights_init=weights_init, biases_init=biases_init)
+        # hidden to area.input_dim
+        self.area_transform = FeedforwardSequence([
+            Linear(input_dim=input_dim,
+                   output_dim=area_transform.brick.input_dim,
+                   name="area_pretransform",
+                   weights_init=weights_init,
+                   biases_init=biases_init).apply,
+            Rectifier().apply,
+            area_transform])
 
         # these are huge reductions in dimensionality, so use
         # normalized initialization to avoid huge values.
         prototype = Linear(weights_init=NormalizedInitialization(IsotropicGaussian(std=1e-3)),
                            biases_init=Constant(0))
-        self.fork = Fork(output_names=['raw_location', 'raw_scale'],
-                         input_dim=self.area.output_dim,
-                         output_dims=[n_spatial_dims, n_spatial_dims],
-                         prototype=prototype,
-                         child_prefix="locator_location_scale")
+        self.area_fork = Fork(output_names=['raw_location', 'raw_scale'],
+                              input_dim=area_transform.brick.output_dim,
+                              output_dims=[n_spatial_dims, n_spatial_dims],
+                              prototype=prototype,
+                              child_prefix="area_fork")
 
-        self.children = [self.area, self.fork]
+        self.children = [self.area_transform, self.area_fork]
 
     @application(inputs=['h'], outputs=['location', 'scale'])
     def apply(self, h):
-        area = self.area.apply(h)
-        return self.fork.apply(area)
+        area = self.area_transform.apply(h)
+        return self.area_fork.apply(area)
 
 # this belongs on SpatialAttention as a static method, but that breaks pickling
 def static_map_to_image_space(location, scale, patch_shape, image_shape):
@@ -177,7 +182,7 @@ class RecurrentAttentionModel(BaseRecurrent):
         return h, c, location, scale, patch, mean_savings
 
 def construct_cnn(layer_specs, n_channels, input_shape, **kwargs):
-    transform = ConvolutionalSequence(
+    cnn = ConvolutionalSequence(
         layers=[ConvolutionalLayer(activation=Rectifier().apply,
                                    name="patch_conv_%i" % i,
                                    **layer_spec)
@@ -186,16 +191,46 @@ def construct_cnn(layer_specs, n_channels, input_shape, **kwargs):
         image_size=tuple(input_shape),
         weights_init=IsotropicGaussian(std=1e-8),
         biases_init=Constant(0))
-    transform.push_allocation_config()
-    # ConvolutionalSequence doesn't provide output_dim
-    output_dim = reduce(operator.mul, transform.get_dim("output"))
-    return transform, output_dim
+    # ensure output dim is determined
+    cnn.push_allocation_config()
+    return cnn
 
 def construct_mlp(hidden_dims, input_dim, initargs, **kwargs):
+    if not hidden_dims:
+        return FeedforwardIdentity(dim=input_dim)
     dims = [input_dim] + hidden_dims
     activations = [Rectifier() for i in xrange(len(hidden_dims))]
-    transform = FeedforwardSequence([Flattener().apply,
-                                     MLP(activations=activations,
-                                         dims=dims,
-                                         **initargs).apply])
-    return transform, transform.output_dim
+    mlp = MLP(activations=activations,
+              dims=dims,
+              **initargs)
+    return mlp
+
+class FeedforwardFlattener(Flattener, Feedforward):
+    def __init__(self, input_shape, **kwargs):
+        super(FeedforwardFlattener, self).__init__(**kwargs)
+        self.input_shape = input_shape
+
+    @property
+    def input_dim(self):
+        return reduce(operator.mul, self.input_shape)
+
+    @property
+    def output_dim(self):
+        return reduce(operator.mul, self.input_shape)
+
+class FeedforwardIdentity(Feedforward):
+    def __init__(self, dim, **kwargs):
+        super(FeedforwardIdentity, self).__init__(**kwargs)
+        self.dim = dim
+
+    @property
+    def input_dim(self):
+        return self.dim
+
+    @property
+    def output_dim(self):
+        return self.dim
+
+    @application(inputs=["x"], outputs=["x"])
+    def apply(self, x):
+        return x

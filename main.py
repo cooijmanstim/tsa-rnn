@@ -18,7 +18,7 @@ from blocks.extensions.monitoring import TrainingDataMonitoring, DataStreamMonit
 from blocks.extensions.saveload import Checkpoint
 from blocks.main_loop import MainLoop
 from blocks.extensions import FinishAfter, Printing, ProgressBar
-from blocks.bricks import Rectifier, Tanh
+from blocks.bricks import Tanh, FeedforwardSequence
 from blocks.bricks.recurrent import LSTM
 from blocks.graph import ComputationGraph
 from blocks.extras.extensions.plot import Plot
@@ -37,8 +37,8 @@ from dump import Dump, DumpMinimum, PrintingTo
 floatX = theano.config.floatX
 
 class Ram(object):
-    def __init__(self, image_shape, patch_shape, patch_transform,
-                 patch_postdim, hidden_dim, area_dim, n_spatial_dims,
+    def __init__(self, image_shape, patch_shape, hidden_dim, n_spatial_dims,
+                 patch_transform, area_transform, response_transform,
                  location_std, scale_std, cutoff, batched_window,
                  initargs, emitter, **kwargs):
         self.rng = theano.sandbox.rng_mrg.MRG_RandomStreams(12345)
@@ -49,7 +49,7 @@ class Ram(object):
                         name="recurrent",
                         weights_init=IsotropicGaussian(1e-4),
                         biases_init=Constant(0))
-        self.locator = masonry.Locator(hidden_dim, area_dim, n_spatial_dims,
+        self.locator = masonry.Locator(hidden_dim, n_spatial_dims, area_transform,
                                        **initargs)
         self.cropper = crop.LocallySoftRectangularCropper(
             n_spatial_dims=n_spatial_dims,
@@ -57,10 +57,10 @@ class Ram(object):
             kernel=crop.Gaussian(), cutoff=cutoff,
             batched_window=batched_window)
         self.merger = masonry.Merger(
-            n_spatial_dims, patch_postdim, area_dim, response_dim=self.rnn.get_dim("inputs"),
-            patch_posttransform=patch_transform.apply,
-            area_posttransform=Rectifier(),
-            response_posttransform=Rectifier(),
+            patch_transform=patch_transform,
+            area_transform=area_transform,
+            response_transform=response_transform,
+            n_spatial_dims=n_spatial_dims,
             **initargs)
         self.attention = masonry.SpatialAttention(self.locator, self.cropper, self.merger)
         self.emitter = emitter
@@ -102,24 +102,44 @@ def get_task(task_name, hyperparameters, **kwargs):
                  svhn_number=goodfellow_svhn.NumberTask)[task_name]
     return klass(**hyperparameters)
 
-def construct_model(task, patch_transform_spec,
-                    patch_shape, initargs, n_channels,
-                    hyperparameters, **kwargs):
-    if "cnn" in patch_transform_spec:
-        patch_transform, patch_postdim = masonry.construct_cnn(
-            patch_transform_spec["cnn"],
+def construct_model(task, patch_shape, initargs, n_channels, hidden_dim,
+                    area_mlp_spec, response_mlp_spec, hyperparameters,
+                    patch_cnn_spec=None, patch_mlp_spec=None,
+                    **kwargs):
+    patch_transforms = []
+    if patch_cnn_spec:
+        patch_transforms.append(masonry.construct_cnn(
+            patch_cnn_spec,
             input_shape=patch_shape,
-            **hyperparameters)
-    elif "mlp" in patch_transform_spec:
-        patch_transform, patch_postdim = masonry.construct_mlp(
-            patch_transform_spec["mlp"],
-            input_dim=n_channels * reduce(op.mul, patch_shape),
-            **hyperparameters)
+            **hyperparameters).apply)
+        shape = patch_transforms[-1].brick.get_dim("output")
+    else:
+        shape = (n_channels,) + tuple(patch_shape)
+    patch_transforms.append(masonry.FeedforwardFlattener(input_shape=shape).apply)
+    if patch_mlp_spec:
+        patch_transforms.append(masonry.construct_mlp(
+            hidden_dims=patch_mlp_spec,
+            input_dim=patch_transforms[-1].brick.output_dim,
+            **hyperparameters).apply)
+    patch_transform = FeedforwardSequence(patch_transforms)
+
+    area_transform = masonry.construct_mlp(
+        area_mlp_spec[1:],
+        input_dim=area_mlp_spec[0],
+        **hyperparameters)
+
+    # LSTM requires the input to have dim=4*hidden_dim
+    response_mlp_spec.append(4*hidden_dim)
+    response_transform = masonry.construct_mlp(
+        response_mlp_spec[1:],
+        input_dim=response_mlp_spec[0],
+        **hyperparameters)
 
     emitter = task.get_emitter(**hyperparameters)
 
-    return Ram(patch_postdim=patch_postdim,
-               patch_transform=patch_transform,
+    return Ram(patch_transform=patch_transform.apply,
+               area_transform=area_transform.apply,
+               response_transform=response_transform.apply,
                emitter=emitter,
                **hyperparameters)
 
