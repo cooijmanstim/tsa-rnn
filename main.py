@@ -185,15 +185,14 @@ def construct_monitors(algorithm, task, n_patches, x, x_uncentered,
     #    quantity.name = "%s_mean" % activation.name
     #    channels.append(quantity)
 
-    monitors = OrderedDict()
-    monitors["train"] = TrainingDataMonitoring(
+    monitors = []
+    monitors.append(TrainingDataMonitoring(
         step_channels,
-        prefix="train", after_epoch=True)
-    for which in "train valid test".split():
-        monitors[which] = DataStreamMonitoring(
-            (channels.get_channels() + [cost]),
-            data_stream=task.get_stream(which),
-            prefix=which, after_epoch=True)
+        prefix="train", after_epoch=True))
+    monitors.extend(DataStreamMonitoring((channels.get_channels() + [cost]),
+                                         data_stream=task.get_stream(which),
+                                         prefix=which, after_epoch=True)
+                    for which in "train valid test".split())
 
     patch_monitoring = PatchMonitoring(
         task.get_stream("valid", SequentialScheme(5, 5)),
@@ -208,7 +207,7 @@ def construct_monitors(algorithm, task, n_patches, x, x_uncentered,
                    after_epoch=True,
                    server_url=plot_url)
 
-    return list(monitors.values()) + [patch_monitoring, plotter]
+    return monitors + [patch_monitoring, plotter]
 
 def construct_main_loop(name, task_name, patch_shape, batch_size,
                         n_spatial_dims, n_patches, n_epochs,
