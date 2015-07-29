@@ -7,12 +7,17 @@ hidden_dim: 256
 n_patches: 8
 patch_shape: [8, 8]
 #patch_cnn_spec:
-#    - border_mode: full
-#      filter_size: [4, 4]
+#    - type: conv
+#      border_mode: full
+#      size: [4, 4]
 #      num_filters: 32
-#    - border_mode: full
-#      filter_size: [4, 4]
+#    - type: conv
+#      border_mode: full
+#      size: [4, 4]
 #      num_filters: 32
+#    - type: pool
+#      size: [2, 2]
+#      step: [2, 2]
 patch_mlp_spec: [128]
 prefork_area_mlp_spec: [64]
 postmerge_area_mlp_spec: [64]

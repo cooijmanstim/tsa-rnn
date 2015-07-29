@@ -1,4 +1,7 @@
 import operator
+import logging
+
+logger = logging.getLogger(__name__)
 
 import theano
 import theano.tensor as T
@@ -7,7 +10,7 @@ from blocks.bricks.base import application, Brick
 from blocks.bricks.parallel import Fork, Merge, Parallel
 from blocks.bricks.recurrent import BaseRecurrent, recurrent, LSTM
 from blocks.bricks import Linear, Rectifier, Initializable, MLP, FeedforwardSequence, Feedforward
-from blocks.bricks.conv import ConvolutionalSequence, ConvolutionalLayer, Flattener
+from blocks.bricks.conv import ConvolutionalSequence, ConvolutionalActivation, MaxPooling, Flattener
 from blocks.initialization import Constant, IsotropicGaussian
 
 from util import NormalizedInitialization
@@ -189,11 +192,24 @@ class RecurrentAttentionModel(BaseRecurrent):
         return h, c, location, scale, patch, mean_savings
 
 def construct_cnn_layer(name, layer_spec):
-    for key in "filter_size conv_step pooling_size pooling_step".split():
-        layer_spec.setdefault(key, (1, 1))
-    return ConvolutionalLayer(name=name,
-                              activation=Rectifier().apply,
-                              **layer_spec)
+    type_ = layer_spec.pop("type", "conv")
+    if type_ == "pool":
+        layer = MaxPooling(
+            name=name,
+            pooling_size=layer_spec.pop("size", (1, 1)),
+            step=layer_spec.pop("step", (1, 1)))
+    elif type_ == "conv":
+        layer = ConvolutionalActivation(
+            name=name,
+            activation=Rectifier().apply,
+            filter_size=layer_spec.pop("size", (1, 1)),
+            step=layer_spec.pop("step", (1, 1)),
+            num_filters=layer_spec.pop("num_filters", 1),
+            border_mode=layer_spec.pop("border_mode", (0, 0)))
+    if layer_spec:
+        logger.warn("ignoring unknown layer specification keys [%s]"
+                    % " ".join(layer_spec.keys()))
+    return layer
 
 def construct_cnn(name, layer_specs, n_channels, input_shape):
     cnn = ConvolutionalSequence(

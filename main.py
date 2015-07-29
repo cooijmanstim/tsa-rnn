@@ -1,5 +1,6 @@
 import yaml
 import os
+import logging
 
 import theano
 import theano.tensor as T
@@ -264,6 +265,8 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
     return main_loop
 
 if __name__ == "__main__":
+    logging.basicConfig()
+
     import argparse
 
     parser = argparse.ArgumentParser()
