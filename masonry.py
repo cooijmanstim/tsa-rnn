@@ -3,6 +3,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+import numpy as np
+
 import theano
 import theano.tensor as T
 
@@ -218,11 +220,19 @@ def construct_cnn(name, layer_specs, n_channels, input_shape):
                                     layer_spec)
                 for i, layer_spec in enumerate(layer_specs)],
         num_channels=n_channels,
-        image_size=tuple(input_shape),
-        weights_init=IsotropicGaussian(std=1e-8),
-        biases_init=Constant(0))
+        image_size=tuple(input_shape))
     # ensure output dim is determined
     cnn.push_allocation_config()
+    # variance-preserving initialization
+    prev_num_filters = n_channels
+    for layer in cnn.layers:
+        if not hasattr(layer, "filter_size"):
+            continue
+        layer.weights_init = IsotropicGaussian(
+            std=np.sqrt(2./(np.prod(layer.filter_size) * prev_num_filters)))
+        layer.biases_init = Constant(0)
+        prev_num_filters = layer.num_filters
+    cnn.initialize()
     return cnn
 
 def construct_mlp(name, hidden_dims, input_dim, initargs):
