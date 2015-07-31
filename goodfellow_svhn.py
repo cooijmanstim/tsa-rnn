@@ -18,7 +18,7 @@ import tasks
 class SVHN(H5PYDataset):
     def __init__(self, **kwargs):
         kwargs.setdefault('load_in_memory', True)
-        self.filename = 'dataset_64x64.h5'
+        self.filename = 'dataset_64_gray.h5'
         super(SVHN, self).__init__(self.data_path, **kwargs)
 
     @property
