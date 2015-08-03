@@ -2,10 +2,12 @@ import os
 
 import numpy as np
 
-from blocks.serialization import dump
 from blocks.extensions import SimpleExtension, Printing
 
 import util
+
+def dump_arrays(filename, arraydict):
+    np.savez(filename, arraydict)
 
 class Dump(SimpleExtension):
     def __init__(self, save_path, **kwargs):
@@ -17,8 +19,8 @@ class Dump(SimpleExtension):
         if not os.path.exists(self.save_path):
             os.mkdir(self.save_path)
         filename = "params_%i.npz" % self.main_loop.status["epochs_done"]
-        with open(os.path.join(self.save_path, filename), "wb") as f:
-            dump(self.main_loop.model.get_parameter_dict(), f)
+        dump_arrays(os.path.join(self.save_path, filename),
+                    self.main_loop.model.get_parameter_dict())
 
 class PrintingTo(Printing):
     def __init__(self, path, **kwargs):
@@ -55,5 +57,5 @@ class DumpMinimum(SimpleExtension):
         if not os.path.exists(self.save_path):
             os.mkdir(self.save_path)
         filename = "params_%i.npz" % self.main_loop.status["epochs_done"]
-        with open(os.path.join(self.save_path, filename), "wb") as f:
-            dump(self.main_loop.model.get_parameter_dict(), f)
+        dump_arrays(os.path.join(self.save_path, filename),
+                    self.main_loop.model.get_parameter_dict())
