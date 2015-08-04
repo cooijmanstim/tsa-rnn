@@ -27,12 +27,6 @@ class Merger(Initializable):
         self.rectifier = Rectifier()
 
         self.patch_transform = patch_transform
-
-        self.area_merge = Merge(input_names="location scale".split(),
-                                input_dims=[n_spatial_dims, n_spatial_dims],
-                                output_dim=area_transform.brick.input_dim,
-                                child_prefix="area_merge")
-        self.area_merge.children[0].use_bias = True
         self.area_transform = area_transform
 
         self.whatwhere_interaction = whatwhere_interaction
@@ -47,7 +41,7 @@ class Merger(Initializable):
             self.response_merge.children[0].use_bias = True
         self.response_transform = response_transform
 
-        self.children = [self.rectifier, self.area_merge, self.response_merge,
+        self.children = [self.rectifier, self.response_merge,
                          patch_transform.brick,
                          area_transform.brick,
                          response_transform.brick]
@@ -59,9 +53,7 @@ class Merger(Initializable):
         # the location/scale as merely additional hidden units
         #location, scale = list(map(theano.gradient.disconnected_grad, (location, scale)))
         patch = self.patch_transform(patch)
-        area = self.area_merge.apply(location, scale)
-        area = self.rectifier.apply(area)
-        area = self.area_transform(area)
+        area = self.area_transform(T.concatenate([location, scale], axis=1))
         parts = self.response_merge.apply(area, patch)
         if self.whatwhere_interaction == "additive":
             response = self.rectifier.apply(sum(parts))
@@ -75,32 +67,25 @@ class Locator(Initializable):
                  weights_init, biases_init, **kwargs):
         super(Locator, self).__init__(**kwargs)
 
-        # hidden to area.input_dim
-        self.area_transform = FeedforwardSequence([
-            Linear(input_dim=input_dim,
-                   output_dim=area_transform.brick.input_dim,
-                   name="area_pretransform",
-                   weights_init=weights_init,
-                   biases_init=biases_init).apply,
-            Rectifier().apply,
-            area_transform])
+        self.area_transform = area_transform
 
-        # these are huge reductions in dimensionality, so use
-        # normalized initialization to avoid huge values.
-        prototype = Linear(weights_init=NormalizedInitialization(IsotropicGaussian(std=1e-3)),
-                           biases_init=Constant(0))
-        self.area_fork = Fork(output_names=['raw_location', 'raw_scale'],
-                              input_dim=area_transform.brick.output_dim,
-                              output_dims=[n_spatial_dims, n_spatial_dims],
-                              prototype=prototype,
-                              child_prefix="area_fork")
+        self.locationscale = Linear(
+            input_dim=area_transform.brick.output_dim,
+            output_dim=2*n_spatial_dims,
+            # these are huge reductions in dimensionality, so use
+            # normalized initialization to avoid huge values.
+            weights_init=NormalizedInitialization(IsotropicGaussian(std=1e-3)),
+            biases_init=Constant(0),
+            name="locationscale")
 
-        self.children = [self.area_transform, self.area_fork]
+        self.children = [self.area_transform.brick, self.locationscale]
 
     @application(inputs=['h'], outputs=['location', 'scale'])
     def apply(self, h):
-        area = self.area_transform.apply(h)
-        return self.area_fork.apply(area)
+        area = self.area_transform(h)
+        locationscale = self.locationscale.apply(area)
+        return (locationscale[:, :2],
+                locationscale[:, 2:])
 
 # this belongs on SpatialAttention as a static method, but that breaks pickling
 def static_map_to_image_space(location, scale, patch_shape, image_shape):

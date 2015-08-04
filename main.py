@@ -106,7 +106,7 @@ def get_task(task_name, hyperparameters, **kwargs):
                  svhn_number=goodfellow_svhn.NumberTask)[task_name]
     return klass(**hyperparameters)
 
-def construct_model(task, patch_shape, initargs, n_channels, hidden_dim,
+def construct_model(task, patch_shape, initargs, n_channels, n_spatial_dims, hidden_dim,
                     hyperparameters, patch_cnn_spec=None, patch_mlp_spec=None,
                     prefork_area_mlp_spec=[], postmerge_area_mlp_spec=[], response_mlp_spec=[],
                     **kwargs):
@@ -131,14 +131,14 @@ def construct_model(task, patch_shape, initargs, n_channels, hidden_dim,
 
     prefork_area_transform = masonry.construct_mlp(
         name="prefork_area_mlp",
-        hidden_dims=prefork_area_mlp_spec[1:],
-        input_dim=prefork_area_mlp_spec[0],
+        input_dim=hidden_dim,
+        hidden_dims=prefork_area_mlp_spec,
         initargs=initargs)
 
     postmerge_area_transform = masonry.construct_mlp(
         name="postmerge_area_mlp",
-        hidden_dims=postmerge_area_mlp_spec[1:],
-        input_dim=postmerge_area_mlp_spec[0],
+        input_dim=2*n_spatial_dims,
+        hidden_dims=postmerge_area_mlp_spec,
         initargs=initargs)
 
     # LSTM requires the input to have dim=4*hidden_dim
