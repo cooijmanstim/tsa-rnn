@@ -31,8 +31,8 @@ class SingleSoftmax(Initializable):
                            for energy in energies]
         error_rates = [T.neq(y.flatten(), energy.argmax(axis=1)).mean(axis=0)
                        for energy in energies]
-        # train on all predictions
-        cost = util.named(T.stack(*cross_entropies).mean(), "cost")
+        # train on final prediction
+        cost = util.named(cross_entropies[-1], "cost")
         # monitor final prediction
         self.add_auxiliary_variable(cross_entropies[-1], name="cross_entropy")
         self.add_auxiliary_variable(error_rates[-1], name="error_rate")
