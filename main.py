@@ -28,7 +28,7 @@ import util
 from patchmonitor import PatchMonitoring
 
 import mnist
-import mnist_cluttered
+import cluttered_mnist_video
 import svhn
 import goodfellow_svhn
 
@@ -101,7 +101,7 @@ class Ram(object):
 
 def get_task(task_name, hyperparameters, **kwargs):
     klass = dict(mnist=mnist.Task,
-                 mnist_cluttered=mnist_cluttered.Task,
+                 cluttered_mnist_video=cluttered_mnist_video.Task,
                  svhn_digit=svhn.DigitTask,
                  svhn_number=goodfellow_svhn.NumberTask)[task_name]
     return klass(**hyperparameters)
@@ -160,7 +160,7 @@ def construct_model(task, patch_shape, initargs, n_channels, n_spatial_dims, hid
 
 def construct_monitors(algorithm, task, n_patches, x, x_uncentered,
                        hs, cs, locations, scales, patches, mean_savings,
-                       graph, plot_url, name, model, cost,
+                       graph, plot_url, name, model, cost, n_spatial_dims,
                        patchmonitor_interval=100, **kwargs):
     channels = util.Channels()
     channels.append(util.named(mean_savings.mean(), "mean_savings"))
@@ -187,29 +187,32 @@ def construct_monitors(algorithm, task, n_patches, x, x_uncentered,
     #    quantity.name = "%s_mean" % activation.name
     #    channels.append(quantity)
 
-    monitors = []
-    monitors.append(TrainingDataMonitoring(
+    extensions = []
+    extensions.append(TrainingDataMonitoring(
         step_channels,
         prefix="train", after_epoch=True))
-    monitors.extend(DataStreamMonitoring((channels.get_channels() + [cost]),
+    extensions.extend(DataStreamMonitoring((channels.get_channels() + [cost]),
                                          data_stream=task.get_stream(which),
                                          prefix=which, after_epoch=True)
                     for which in "train valid test".split())
 
-    patch_monitoring = PatchMonitoring(
-        task.get_stream("valid", SequentialScheme(5, 5)),
-        every_n_batches=patchmonitor_interval,
-        extractor=theano.function([x_uncentered], [locations, scales, patches]),
-        map_to_image_space=masonry.static_map_to_image_space)
-    patch_monitoring.save_patches("test.png")
+    if n_spatial_dims == 2:
+        patch_monitoring = PatchMonitoring(
+            task.get_stream("valid", SequentialScheme(5, 5)),
+            every_n_batches=patchmonitor_interval,
+            extractor=theano.function([x_uncentered], [locations, scales, patches]),
+            map_to_image_space=masonry.static_map_to_image_space)
+        patch_monitoring.save_patches("test.png")
+        extensions.append(patch_monitoring)
 
     step_plots = [["train_%s" % step_channel.name for step_channel in step_channels]]
-    plotter = Plot(name,
-                   channels=(task.plot_channels() + [['train_cost']] + step_plots),
-                   after_epoch=True,
-                   server_url=plot_url)
+    extensions.append(Plot(
+        name,
+        channels=(task.plot_channels() + [['train_cost']] + step_plots),
+        after_epoch=True,
+        server_url=plot_url))
 
-    return monitors + [patch_monitoring, plotter]
+    return extensions
 
 def construct_main_loop(name, task_name, patch_shape, batch_size,
                         n_spatial_dims, n_patches, n_epochs,

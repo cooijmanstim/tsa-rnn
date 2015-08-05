@@ -67,6 +67,7 @@ class Locator(Initializable):
                  weights_init, biases_init, **kwargs):
         super(Locator, self).__init__(**kwargs)
 
+        self.n_spatial_dims = n_spatial_dims
         self.area_transform = area_transform
 
         self.locationscale = Linear(
@@ -84,8 +85,8 @@ class Locator(Initializable):
     def apply(self, h):
         area = self.area_transform(h)
         locationscale = self.locationscale.apply(area)
-        return (locationscale[:, :2],
-                locationscale[:, 2:])
+        return (locationscale[:, :self.n_spatial_dims],
+                locationscale[:, self.n_spatial_dims:])
 
 # this belongs on SpatialAttention as a static method, but that breaks pickling
 def static_map_to_image_space(location, scale, patch_shape, image_shape):

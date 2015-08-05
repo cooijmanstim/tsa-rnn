@@ -28,12 +28,21 @@ class Classification(object):
             iteration_scheme=scheme)
 
     def get_variables(self):
-        # shape (batch, channel, height, width)
-        x = T.tensor4('features', dtype=theano.config.floatX)
-        # shape (batch_size, n_classes)
-        y = T.lmatrix('targets')
-
         test_batch = self.get_stream("valid").get_epoch_iterator(as_dict=True).next()
+
+        broadcastable = [False]*test_batch["features"].ndim
+        # shape (batch, channel, [time,] height, width)
+        x = T.TensorType(broadcastable=broadcastable,
+                         dtype=theano.config.floatX)("features")
+        # shape (batch_size, n_classes)
+        broadcastable = [False]*test_batch["targets"].ndim
+        y = T.TensorType(broadcastable=broadcastable,
+                         dtype="uint8")('targets')
+
+        # remove the singleton from mnist and svhn targets
+        if test_batch["targets"].ndim == 2 and test_batch["targets"].shape[1] == 1:
+            y = y.flatten()
+
         theano.config.compute_test_value = 'warn'
         x.tag.test_value = test_batch["features"]
         y.tag.test_value = test_batch["targets"]
