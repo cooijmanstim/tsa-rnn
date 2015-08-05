@@ -11,7 +11,6 @@ def dump_arrays(filename, arraydict):
 
 class Dump(SimpleExtension):
     def __init__(self, save_path, **kwargs):
-        kwargs.setdefault("after_epoch", True)
         super(Dump, self).__init__(**kwargs)
         self.save_path = save_path
 
