@@ -1,3 +1,7 @@
+import logging
+
+import numpy as np
+
 import theano
 import theano.tensor as T
 
@@ -7,6 +11,8 @@ from fuel.streams import DataStream
 from fuel.schemes import ShuffledScheme
 
 import emitters
+
+logger = logging.getLogger(__name__)
 
 class Classification(object):
     def __init__(self, batch_size, hidden_dim, shrink_dataset_by=1, **kwargs):
@@ -61,13 +67,23 @@ class Classification(object):
                 for name in "cross_entropy error_rate".split()]
 
     def preprocess(self, x):
-        print "taking mean"
-        mean = 0
-        n = 0
-        for batch in self.get_stream("train").get_epoch_iterator(as_dict=True):
-            batch_sum = batch["features"].sum(axis=0, keepdims=True)
-            k = batch["features"].shape[0]
-            mean = n/float(n+k) * mean + 1/float(n+k) * batch_sum
-            n += k
-        print "mean taken"
+        cache = "/data/lisatmp3/cooijmat/preprocess-cache/%s.npz" % self.name
+        try:
+            data = np.load(cache)
+            mean = data["mean"]
+        except IOError:
+            print "taking mean"
+            mean = 0
+            n = 0
+            for batch in self.get_stream("train").get_epoch_iterator(as_dict=True):
+                batch_sum = batch["features"].sum(axis=0, keepdims=True)
+                k = batch["features"].shape[0]
+                mean = n/float(n+k) * mean + 1/float(n+k) * batch_sum
+                n += k
+            print "mean taken"
+            try:
+                np.savez(cache, mean=mean)
+            except IOError:
+                logger.error("couldn't save preprocessing cache")
+                import ipdb; ipdb.set_trace()
         return x - mean

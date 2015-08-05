@@ -2,6 +2,8 @@ from fuel.datasets.mnist import MNIST
 import tasks
 
 class Task(tasks.Classification):
+    name = "mnist"
+
     def __init__(self, *args, **kwargs):
         super(Task, self).__init__(*args, **kwargs)
         self.n_classes = 10

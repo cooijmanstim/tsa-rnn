@@ -19,6 +19,8 @@ def mapping(data):
     return x, y
 
 class Task(tasks.Classification):
+    name = "cluttered_mnist_video"
+
     def __init__(self, *args, **kwargs):
         super(Task, self).__init__(*args, **kwargs)
         self.n_channels = 1

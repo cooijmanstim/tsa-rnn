@@ -9,6 +9,8 @@ def fix_target_representation(data):
     return x, y
 
 class DigitTask(tasks.Classification):
+    name = "svhn_digit"
+
     def __init__(self, *args, **kwargs):
         super(DigitTask, self).__init__(*args, **kwargs)
         self.n_classes = 10

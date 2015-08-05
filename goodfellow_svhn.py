@@ -97,6 +97,8 @@ class Emitter(Initializable):
         return cost
 
 class NumberTask(tasks.Classification):
+    name = "svhn_number"
+
     def __init__(self, *args, **kwargs):
         super(NumberTask, self).__init__(*args, **kwargs)
         self.max_length = 5
