@@ -174,9 +174,73 @@ class Gaussian(object):
         return T.exp(-0.5*x2/(sigma**2)) / volume
 
     def sigma(self, scale):
-        return 0.5 / scale
+        # letting sigma vary smoothly with scale makes sense with a
+        # smooth input, but the image is discretized and beyond some
+        # point the kernels become so narrow that all the pixels are
+        # too far away to contribute.  the filter response fades to
+        # black.
+        # let's not let this happen; put a lower bound on sigma.
+        yuck = scale > 1.0
+        scale = (1 - yuck)*scale + yuck*1.0
+        sigma = 0.5 / scale
+        return sigma
 
     def k_sigma_radius(self, k, scale):
         # this isn't correct in multiple dimensions, but it's good enough
         return k * self.sigma(scale)
 
+
+if __name__ == "__main__":
+    import numpy as np
+    from goodfellow_svhn import NumberTask
+    import matplotlib.pyplot as plt
+
+    batch_size = 10
+    task = NumberTask(batch_size=batch_size, hidden_dim=1, shrink_dataset_by=100)
+    batch = task.get_stream("valid").get_epoch_iterator(as_dict=True).next()
+    x_uncentered, y = task.get_variables()
+    x = task.preprocess(x_uncentered)
+    n_spatial_dims = 2
+    image_shape = batch["features"].shape[-n_spatial_dims:]
+    patch_shape = (16, 16)
+    cropper = SoftRectangularCropper(n_spatial_dims=n_spatial_dims,
+                                     patch_shape=patch_shape,
+                                     image_shape=image_shape,
+                                     kernel=Gaussian())
+
+    scales = 1.3**np.arange(-7, 6)
+    n_patches = len(scales)
+
+    locations = (np.ones((n_patches, batch_size, 2)) * image_shape/2).astype(np.float32)
+    scales = np.tile(scales[:, np.newaxis, np.newaxis], (1, batch_size, 2)).astype(np.float32)
+
+    Tpatches = T.stack(*[cropper.apply(x_uncentered, T.constant(location), T.constant(scale))[0]
+                         for location, scale in zip(locations, scales)])
+
+    patches = theano.function([x_uncentered], Tpatches)(batch["features"])
+
+    m, n = batch_size, n_patches + 1
+
+    oh_imshow = dict(interpolation="none", cmap="gray", vmin=0.0, vmax=1.0, aspect="equal")
+
+    print patches.shape
+    for i in xrange(m):
+        image = batch["features"][i, 0]
+        image_ax = plt.subplot(m, n, i * n + 1)
+        plt.imshow(image, shape=image_shape, axes=image_ax, **oh_imshow)
+        # remove clutter
+        for side in "top left bottom right".split():
+            image_ax.tick_params(which="both", **{side: "off",
+                                                  "label%s"%side: "off"})
+
+        for j in xrange(1, n):
+            patch = patches[j - 1, i, 0]
+            location, scale = locations[j - 1, 0, 0], scales[j - 1, 0, 0]
+            patch_ax = plt.subplot(m, n, i*n + j + 1)
+            plt.imshow(patch, shape=patch.shape, axes=patch_ax, **oh_imshow)
+            plt.title("%3.2f" % scale)
+            # remove clutter
+            for side in "top left bottom right".split():
+                patch_ax.tick_params(which="both", **{side: "off",
+                                                      "label%s"%side: "off"})
+    plt.show()
