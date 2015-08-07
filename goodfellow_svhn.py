@@ -94,7 +94,7 @@ class Emitter(Initializable):
         self.add_auxiliary_variable(error_rates[-1], name="error_rate")
 
         # minimize the mean cross entropy over time and over batch
-        cost = T.stack(*mean_cross_entropies).mean()
+        cost = mean_cross_entropies[-1]
         return cost
 
 class NumberTask(tasks.Classification):
