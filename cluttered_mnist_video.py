@@ -16,6 +16,7 @@ def mapping(data):
     x, y = data
     # move channel just after batch axis
     x = np.rollaxis(x, x.ndim - 1, 1)
+    x = x.astype(np.float32) / 255
     return x, y
 
 class Task(tasks.Classification):
