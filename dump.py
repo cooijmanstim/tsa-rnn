@@ -6,8 +6,15 @@ from blocks.extensions import SimpleExtension, Printing
 
 import util
 
-def dump_arrays(filename, arraydict):
-    np.savez(filename, arraydict)
+def dump_model_parameters(file, model):
+    np.savez(file,
+             **dict((key, value.get_value())
+                    for key, value in model.get_parameter_dict().iteritems()))
+
+def load_model_parameters(file, model):
+    parameters = np.load(file)
+    parameters = dict(("/%s" % k, v) for (k, v) in parameters.items())
+    model.set_parameter_values(parameters)
 
 class Dump(SimpleExtension):
     def __init__(self, save_path, **kwargs):
@@ -18,8 +25,7 @@ class Dump(SimpleExtension):
         if not os.path.exists(self.save_path):
             os.mkdir(self.save_path)
         filename = "params_%i.npz" % self.main_loop.status["epochs_done"]
-        dump_arrays(os.path.join(self.save_path, filename),
-                    self.main_loop.model.get_parameter_dict())
+        dump_model_parameters(filename, self.main_loop.model)
 
 class PrintingTo(Printing):
     def __init__(self, path, **kwargs):
@@ -53,5 +59,4 @@ class DumpMinimum(SimpleExtension):
             self.do_dump()
 
     def do_dump(self):
-        dump_arrays(self.save_path,
-                    self.main_loop.model.get_parameter_dict())
+        dump_model_parameters(self.save_path, self.main_loop.model)

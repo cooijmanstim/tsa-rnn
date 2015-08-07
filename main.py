@@ -2,6 +2,8 @@ import yaml
 import os
 import logging
 
+import numpy as np
+
 import theano
 import theano.tensor as T
 import theano.sandbox.rng_mrg
@@ -10,7 +12,6 @@ from fuel.schemes import SequentialScheme
 
 from blocks.initialization import IsotropicGaussian, Constant, Orthogonal, Identity
 from blocks.theano_expressions import l2_norm
-from blocks.serialization import load_parameter_values
 from blocks.model import Model
 from blocks.algorithms import GradientDescent, RMSProp, Adam
 from blocks.extensions.monitoring import TrainingDataMonitoring, DataStreamMonitoring
@@ -32,7 +33,7 @@ import cluttered_mnist_video
 import svhn
 import goodfellow_svhn
 
-from dump import Dump, DumpMinimum, PrintingTo
+from dump import Dump, DumpMinimum, PrintingTo, load_model_parameters
 
 floatX = theano.config.floatX
 
@@ -280,7 +281,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--hyperparameters", help="YAML file from which to load hyperparameters")
-    parser.add_argument("--parameters", help="pickle file from which to load parameters")
+    parser.add_argument("--parameters", help="npy/npz file from which to load parameters")
 
     args = parser.parse_args()
 
@@ -298,9 +299,7 @@ if __name__ == "__main__":
     main_loop = construct_main_loop(**hyperparameters)
 
     if args.parameters:
-        # pickle made with blocks.serialization.dump(model.get_parameter_dict())
-        parameters = load_parameter_values(args.parameters)
-        main_loop.model.set_parameter_values(parameters)
+        load_model_parameters(args.parameters, main_loop.model)
 
     print "training..."
     main_loop.run()
