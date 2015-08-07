@@ -12,7 +12,7 @@ from blocks.initialization import IsotropicGaussian, Constant, Orthogonal, Ident
 from blocks.theano_expressions import l2_norm
 from blocks.serialization import load_parameter_values
 from blocks.model import Model
-from blocks.algorithms import GradientDescent, RMSProp
+from blocks.algorithms import GradientDescent, RMSProp, Adam
 from blocks.extensions.monitoring import TrainingDataMonitoring, DataStreamMonitoring
 from blocks.extensions.saveload import Checkpoint
 from blocks.main_loop import MainLoop
@@ -254,7 +254,7 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
     uselessflunky = Model(cost)
     algorithm = GradientDescent(cost=cost,
                                 parameters=graph.parameters,
-                                step_rule=RMSProp(learning_rate=learning_rate))
+                                step_rule=Adam(learning_rate=learning_rate))
     monitors = construct_monitors(
         x=x, x_uncentered=x_uncentered, y=y, hs=hs, cs=cs, cost=cost,
         locations=locations, scales=scales, patches=patches, mean_savings=mean_savings,
