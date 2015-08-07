@@ -53,8 +53,5 @@ class DumpMinimum(SimpleExtension):
             self.do_dump()
 
     def do_dump(self):
-        if not os.path.exists(self.save_path):
-            os.mkdir(self.save_path)
-        filename = "params_%i.npz" % self.main_loop.status["epochs_done"]
-        dump_arrays(os.path.join(self.save_path, filename),
+        dump_arrays(self.save_path,
                     self.main_loop.model.get_parameter_dict())
