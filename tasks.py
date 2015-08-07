@@ -80,6 +80,7 @@ class Classification(object):
                 k = batch["features"].shape[0]
                 mean = n/float(n+k) * mean + 1/float(n+k) * batch_sum
                 n += k
+            mean = mean.astype(np.float32)
             print "mean taken"
             try:
                 np.savez(cache, mean=mean)

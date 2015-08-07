@@ -42,6 +42,7 @@ def fix_representation(data):
     lengths = np.clip(lengths, 0, 5)
     # repurpose the last column to store 0-based lenghts
     y[:, -1] = lengths - 1
+    y = y.astype(np.uint8)
     return x, y
 
 class Emitter(Initializable):
