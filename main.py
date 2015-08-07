@@ -25,7 +25,7 @@ from blocks.extras.extensions.plot import Plot
 import masonry
 import crop
 import util
-from patchmonitor import PatchMonitoring
+from patchmonitor import PatchMonitoring, VideoPatchMonitoring
 
 import mnist
 import cluttered_mnist_video
@@ -196,14 +196,20 @@ def construct_monitors(algorithm, task, n_patches, x, x_uncentered,
                                          prefix=which, after_epoch=True)
                     for which in "train valid test".split())
 
+    patchmonitor = None
     if n_spatial_dims == 2:
-        patch_monitoring = PatchMonitoring(
+        patchmonitor_klass = PatchMonitoring
+    elif n_spatial_dims == 3:
+        patchmonitor_klass = VideoPatchMonitoring
+
+    if patchmonitor_klass:
+        patchmonitor = patchmonitor_klass(
             task.get_stream("valid", SequentialScheme(5, 5)),
             every_n_batches=patchmonitor_interval,
             extractor=theano.function([x_uncentered], [locations, scales, patches]),
-            map_to_image_space=masonry.static_map_to_image_space)
-        patch_monitoring.save_patches("test.png")
-        extensions.append(patch_monitoring)
+            map_to_input_space=masonry.static_map_to_input_space)
+        patchmonitor.save_patches("test.png")
+        extensions.append(patchmonitor)
 
     step_plots = [["train_%s" % step_channel.name for step_channel in step_channels]]
     extensions.append(Plot(

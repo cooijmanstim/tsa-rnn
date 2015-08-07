@@ -89,7 +89,7 @@ class Locator(Initializable):
                 locationscale[:, self.n_spatial_dims:])
 
 # this belongs on SpatialAttention as a static method, but that breaks pickling
-def static_map_to_image_space(location, scale, patch_shape, image_shape):
+def static_map_to_input_space(location, scale, patch_shape, image_shape):
     # linearly map locations from (-1, 1) to image index space
     location = (location + 1) / 2 * image_shape
     # disallow negative scale
@@ -112,8 +112,8 @@ class SpatialAttention(Brick):
 
         self.children = [self.locator, self.cropper, self.merger]
 
-    def map_to_image_space(self, location, scale):
-        return static_map_to_image_space(
+    def map_to_input_space(self, location, scale):
+        return static_map_to_input_space(
             location, scale,
             T.cast(self.cropper.patch_shape, floatX),
             T.cast(self.cropper.image_shape, floatX))
@@ -134,7 +134,7 @@ class SpatialAttention(Brick):
         return u, location, scale, patch, mean_savings
 
     def crop(self, x, location, scale):
-        true_location, true_scale = self.map_to_image_space(location, scale)
+        true_location, true_scale = self.map_to_input_space(location, scale)
         patch, mean_savings = self.cropper.apply(x, true_location, true_scale)
         return patch, mean_savings
 

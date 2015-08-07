@@ -13,13 +13,13 @@ import matplotlib.patches
 from blocks.extensions import SimpleExtension
 
 class PatchMonitoring(SimpleExtension):
-    def __init__(self, data_stream, extractor, map_to_image_space, save_to=".", **kwargs):
+    def __init__(self, data_stream, extractor, map_to_input_space, save_to=".", **kwargs):
         if not os.path.isdir(save_to):
             os.makedirs(save_to)
         self.data_stream = data_stream
         self.save_to = save_to
         self.extractor = extractor
-        self.map_to_image_space = map_to_image_space
+        self.map_to_input_space = map_to_input_space
         self.colors = dict()
         super(PatchMonitoring, self).__init__(**kwargs)
 
@@ -59,7 +59,7 @@ class PatchMonitoring(SimpleExtension):
                                                           subplot_spec=outer_grid[i, 1],
                                                           wspace=0.1, hspace=0.1)
             for j, (patch, location, scale) in enumerate(zip(patches, locations, scales)):
-                true_location, true_scale = self.map_to_image_space(
+                true_location, true_scale = self.map_to_input_space(
                     location, scale,
                     np.array(patch_shape, dtype='float32'),
                     np.array(image_shape, dtype='float32'))
@@ -82,6 +82,73 @@ class PatchMonitoring(SimpleExtension):
         plt.tight_layout()
         fig.savefig(filename, bbox_inches="tight", facecolor="gray")
         plt.close()
+
+    def imshow(self, image, *args, **kwargs):
+        kwargs.setdefault("cmap", "gray")
+        kwargs.setdefault("aspect", "equal")
+        kwargs.setdefault("interpolation", "none")
+        kwargs.setdefault("vmin", 0.0)
+        kwargs.setdefault("vmax", 1.0)
+        kwargs.setdefault("shape", image.shape)
+        plt.imshow(image, *args, **kwargs)
+
+class VideoPatchMonitoring(SimpleExtension):
+    def __init__(self, data_stream, extractor, map_to_input_space, save_to=".", **kwargs):
+        if not os.path.isdir(save_to):
+            os.makedirs(save_to)
+        self.data_stream = data_stream
+        self.save_to = save_to
+        self.extractor = extractor
+        self.map_to_input_space = map_to_input_space
+        super(VideoPatchMonitoring, self).__init__(**kwargs)
+
+    def do(self, which_callback, *args):
+        current_dir = os.getcwd()
+        os.chdir(self.save_to)
+        self.save_patches("patches_iteration_%i" % self.main_loop.status['iterations_done'])
+        os.chdir(current_dir)
+
+    def save_patches(self, filename_stem):
+        batch = self.data_stream.get_epoch_iterator(as_dict=True).next()
+        videos = batch['features']
+        locationss, scaless, patchess = self.extractor(videos)
+
+        n_patches = patchess.shape[1]
+
+        if videos.shape[1] == 1:
+            # remove degenerate channel axis because pyplot rejects it
+            videos = np.squeeze(videos, axis=1)
+            patchess = np.squeeze(patchess, axis=2)
+        else:
+            # move channel axis to the end because pyplot wants this
+            videos = np.rollaxis(videos, 1, videos.ndim)
+            patchess = np.rollaxis(patchess, 2, patchess.ndim)
+
+        outer_grid = gridspec.GridSpec(2, 1)
+        for i, (video, patches, locations, scales) in enumerate(zip(videos, patchess, locationss, scaless)):
+            video_ax = plt.subplot(outer_grid[0, 0])
+            video_image = (video
+                           .transpose(1, 0, 2)
+                           .reshape((video.shape[1],
+                                     video.shape[0] * video.shape[2])))
+            self.imshow(video_image, axes=video_ax)
+            video_ax.axis("off")
+
+            # TODO: maybe rectangles in video_ax
+            patch_ax = plt.subplot(outer_grid[1, 0])
+            patch_image = (patches
+                           .transpose(0, 2, 1, 3)
+                           .reshape((patches.shape[0]*patches.shape[2],
+                                     patches.shape[1]*patches.shape[3])))
+            self.imshow(patch_image, axes=patch_ax)
+            patch_ax.axis("off")
+
+            fig = plt.gcf()
+            fig.set_size_inches((20, 20))
+            plt.tight_layout()
+            filename = "%s_example_%i.png" % (filename_stem, i)
+            fig.savefig(filename, bbox_inches="tight", facecolor="gray")
+            plt.close()
 
     def imshow(self, image, *args, **kwargs):
         kwargs.setdefault("cmap", "gray")
