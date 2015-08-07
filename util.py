@@ -105,25 +105,9 @@ class StdoutLines(list):
         self.extend(self._stringio.getvalue().splitlines())
         sys.stdout = self._stdout
 
-# https://groups.google.com/d/msg/theano-users/rBw1oA-DKgE/CBXjw8uvQroJ
-def batched_tensordot(x, y, axes):
-    try:
-        axes = list(axes)
-    except TypeError:
-        axes = [range(x.ndim - axes, y.ndim), range(1, axes + 1)]
+import theano.sandbox.cuda.blas
 
-    n_sum_axes = len(axes[0])
-    x_dimshuffle = [0] + range(1, x.ndim) + (["x"] * (y.ndim - 1 - n_sum_axes))
-    y_dimshuffle = [0] + (["x"] * (x.ndim - 1 - n_sum_axes)) + range(1, y.ndim)
-
-    # align summation axes
-    for x_sum_axis in axes[0]:
-        x_dimshuffle.remove(x_sum_axis)
-        x_dimshuffle.insert(0, x_sum_axis)
-    for y_sum_axis in axes[1]:
-        y_dimshuffle.remove(y_sum_axis)
-        y_dimshuffle.insert(0, y_sum_axis)
-
-    z = (x.dimshuffle(*x_dimshuffle) * y.dimshuffle(*y_dimshuffle))
-    z = z.sum(axis=range(n_sum_axes))
-    return z
+def batched_tensordot(a, b, axes=2):
+    return T._tensordot_as_dot(a, b, axes,
+                               dot=theano.sandbox.cuda.blas.batched_dot,
+                               batched=True)
