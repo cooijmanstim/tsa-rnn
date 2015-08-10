@@ -105,9 +105,11 @@ class StdoutLines(list):
         self.extend(self._stringio.getvalue().splitlines())
         sys.stdout = self._stdout
 
+import theano.tensor.basic
 import theano.sandbox.cuda.blas
 
 def batched_tensordot(a, b, axes=2):
-    return T._tensordot_as_dot(a, b, axes,
-                               dot=theano.sandbox.cuda.blas.batched_dot,
-                               batched=True)
+    return theano.tensor.basic._tensordot_as_dot(
+        a, b, axes,
+        dot=theano.sandbox.cuda.blas.batched_dot,
+        batched=True)
