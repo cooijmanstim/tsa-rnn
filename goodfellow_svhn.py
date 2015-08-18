@@ -18,13 +18,9 @@ import tasks
 class SVHN(H5PYDataset):
     def __init__(self, **kwargs):
         kwargs.setdefault('load_in_memory', True)
-        self.filename = 'dataset_64_gray.h5'
-        super(SVHN, self).__init__(self.data_path, **kwargs)
-
-    @property
-    def data_path(self):
-        path = os.path.join("/data/lisatmp3/cooijmat/datasets/svhn", self.filename)
-        return path
+        super(SVHN, self).__init__(
+            "/data/lisatmp3/cooijmat/datasets/svhn/dataset_64_gray.h5",
+            **kwargs)
 
 def fix_representation(data):
     x, y = data
