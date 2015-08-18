@@ -17,7 +17,7 @@ from blocks.algorithms import GradientDescent, RMSProp, Adam
 from blocks.extensions.monitoring import TrainingDataMonitoring, DataStreamMonitoring
 from blocks.extensions.saveload import Checkpoint
 from blocks.main_loop import MainLoop
-from blocks.extensions import FinishAfter, Printing, ProgressBar
+from blocks.extensions import FinishAfter, Printing, ProgressBar, Timing
 from blocks.bricks import Tanh, FeedforwardSequence
 from blocks.bricks.recurrent import LSTM
 from blocks.graph import ComputationGraph
@@ -269,6 +269,7 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
                                       Dump(name+'_dump', every_n_epochs=10),
                                       Checkpoint(name+'_checkpoint.pkl', every_n_epochs=10, on_interrupt=False),
                                       ProgressBar(),
+                                      Timing(),
                                       Printing(),
                                       PrintingTo(name+"_log")]),
                          model=uselessflunky)
