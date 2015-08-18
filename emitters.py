@@ -29,7 +29,7 @@ class SingleSoftmax(Initializable):
                     for t in xrange(n_patches)]
         cross_entropies = [self.softmax.categorical_cross_entropy(y.flatten(), energy)
                            for energy in energies]
-        error_rates = [T.neq(y.flatten(), energy.argmax(axis=1)).mean(axis=0)
+        error_rates = [T.neq(y, energy.argmax(axis=1)).mean(axis=0)
                        for energy in energies]
         # train on final prediction
         cost = util.named(cross_entropies[-1], "cost")

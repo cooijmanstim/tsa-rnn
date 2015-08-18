@@ -40,18 +40,18 @@ class Classification(object):
         # shape (batch, channel, [time,] height, width)
         x = T.TensorType(broadcastable=broadcastable,
                          dtype=theano.config.floatX)("features")
-        # shape (batch_size, n_classes)
+        # shape (batch_size, 1)
         broadcastable = [False]*test_batch["targets"].ndim
         y = T.TensorType(broadcastable=broadcastable,
                          dtype="uint8")('targets')
 
+        theano.config.compute_test_value = 'warn'
+        x.tag.test_value = test_batch["features"][:11, ...]
+        y.tag.test_value = test_batch["targets"][:11, ...]
+
         # remove the singleton from mnist and svhn targets
         if test_batch["targets"].ndim == 2 and test_batch["targets"].shape[1] == 1:
             y = y.flatten()
-
-        theano.config.compute_test_value = 'warn'
-        x.tag.test_value = test_batch["features"]
-        y.tag.test_value = test_batch["targets"]
 
         return x, y
 
