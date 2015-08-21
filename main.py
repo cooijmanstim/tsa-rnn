@@ -40,7 +40,7 @@ floatX = theano.config.floatX
 class Ram(object):
     def __init__(self, image_shape, patch_shape, hidden_dim,
                  n_spatial_dims, whatwhere_interaction, prefork_area_transform,
-                 postmerge_area_transform, patch_transform,
+                 postmerge_area_transform, patch_transform, batch_normalize,
                  response_transform, location_std, scale_std, cutoff,
                  batched_window, initargs, emitter, **kwargs):
         self.rng = theano.sandbox.rng_mrg.MRG_RandomStreams(12345)
@@ -65,11 +65,15 @@ class Ram(object):
             response_transform=response_transform,
             n_spatial_dims=n_spatial_dims,
             whatwhere_interaction=whatwhere_interaction,
+            batch_normalize=batch_normalize,
             **initargs)
-        self.attention = masonry.SpatialAttention(self.locator, self.cropper, self.merger)
+        self.attention = masonry.SpatialAttention(
+            self.locator, self.cropper, self.merger,
+            name="sa")
         self.emitter = emitter
         self.model = masonry.RecurrentAttentionModel(
-            self.rnn, self.attention, self.emitter)
+            self.rnn, self.attention, self.emitter,
+            name="ram")
 
     def initialize(self):
         self.model.initialize()
@@ -108,6 +112,7 @@ def get_task(task_name, hyperparameters, **kwargs):
     return klass(**hyperparameters)
 
 def construct_model(task, patch_shape, initargs, n_channels, n_spatial_dims, hidden_dim,
+                    batch_normalize,
                     hyperparameters, patch_cnn_spec=None, patch_mlp_spec=None,
                     prefork_area_mlp_spec=[], postmerge_area_mlp_spec=[], response_mlp_spec=[],
                     **kwargs):
@@ -117,7 +122,8 @@ def construct_model(task, patch_shape, initargs, n_channels, n_spatial_dims, hid
             name="patch_cnn",
             layer_specs=patch_cnn_spec,
             input_shape=patch_shape,
-            n_channels=n_channels).apply)
+            n_channels=n_channels,
+            batch_normalize=batch_normalize).apply)
         shape = patch_transforms[-1].brick.get_dim("output")
     else:
         shape = (n_channels,) + tuple(patch_shape)
@@ -127,19 +133,22 @@ def construct_model(task, patch_shape, initargs, n_channels, n_spatial_dims, hid
             name="patch_mlp",
             hidden_dims=patch_mlp_spec,
             input_dim=patch_transforms[-1].brick.output_dim,
+            batch_normalize=batch_normalize,
             initargs=initargs).apply)
-    patch_transform = FeedforwardSequence(patch_transforms)
+    patch_transform = FeedforwardSequence(patch_transforms, name="ffs")
 
     prefork_area_transform = masonry.construct_mlp(
         name="prefork_area_mlp",
         input_dim=hidden_dim,
         hidden_dims=prefork_area_mlp_spec,
+        batch_normalize=batch_normalize,
         initargs=initargs)
 
     postmerge_area_transform = masonry.construct_mlp(
         name="postmerge_area_mlp",
         input_dim=2*n_spatial_dims,
         hidden_dims=postmerge_area_mlp_spec,
+        batch_normalize=batch_normalize,
         initargs=initargs)
 
     # LSTM requires the input to have dim=4*hidden_dim
@@ -148,6 +157,7 @@ def construct_model(task, patch_shape, initargs, n_channels, n_spatial_dims, hid
         name="response_mlp",
         hidden_dims=response_mlp_spec[1:],
         input_dim=response_mlp_spec[0],
+        batch_normalize=batch_normalize,
         initargs=initargs)
 
     emitter = task.get_emitter(**hyperparameters)

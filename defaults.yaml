@@ -31,3 +31,4 @@ cutoff: 3
 plot_url: http://bart2:5006/
 location_std: 0.1
 scale_std: 0.01
+batch_normalize: True

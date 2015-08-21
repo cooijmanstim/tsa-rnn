@@ -8,12 +8,14 @@ import numpy as np
 import theano
 import theano.tensor as T
 
-from blocks.bricks.base import application, Brick
+from blocks.bricks.base import application, Brick, lazy
+from blocks.roles import add_role, WEIGHT, BIAS
 from blocks.bricks.parallel import Fork, Merge, Parallel
 from blocks.bricks.recurrent import BaseRecurrent, recurrent, LSTM
-from blocks.bricks import Linear, Rectifier, Initializable, MLP, FeedforwardSequence, Feedforward
+from blocks.bricks import Linear, Rectifier, Initializable, MLP, FeedforwardSequence, Feedforward, Bias, Activation
 from blocks.bricks.conv import ConvolutionalSequence, ConvolutionalActivation, MaxPooling, Flattener
 from blocks.initialization import Constant, IsotropicGaussian
+from blocks.utils import shared_floatx_nans
 
 from util import NormalizedInitialization
 
@@ -21,10 +23,9 @@ floatX = theano.config.floatX
 
 class Merger(Initializable):
     def __init__(self, area_transform, patch_transform, response_transform,
-                 n_spatial_dims, whatwhere_interaction="additive", **kwargs):
+                 n_spatial_dims, batch_normalize, whatwhere_interaction="additive",
+                 **kwargs):
         super(Merger, self).__init__(**kwargs)
-
-        self.rectifier = Rectifier()
 
         self.patch_transform = patch_transform
         self.area_transform = area_transform
@@ -37,11 +38,14 @@ class Merger(Initializable):
             output_dims=2*[response_transform.brick.input_dim],
             prototype=Linear(use_bias=False),
             child_prefix="response_merge")
-        if self.whatwhere_interaction == "additive":
-            self.response_merge.children[0].use_bias = True
+        self.response_merge_activation = NormalizedActivation(
+            shape=[response_transform.brick.input_dim],
+            name="response_merge_activation",
+            batch_normalize=batch_normalize)
         self.response_transform = response_transform
 
-        self.children = [self.rectifier, self.response_merge,
+        self.children = [self.response_merge_activation,
+                         self.response_merge,
                          patch_transform.brick,
                          area_transform.brick,
                          response_transform.brick]
@@ -56,9 +60,10 @@ class Merger(Initializable):
         area = self.area_transform(T.concatenate([location, scale], axis=1))
         parts = self.response_merge.apply(area, patch)
         if self.whatwhere_interaction == "additive":
-            response = self.rectifier.apply(sum(parts))
+            response = sum(parts)
         elif self.whatwhere_interaction == "multiplicative":
             response = reduce(operator.mul, parts)
+        response = self.response_merge_activation.apply(response)
         response = self.response_transform(response)
         return response
 
@@ -179,7 +184,7 @@ class RecurrentAttentionModel(BaseRecurrent):
         h, c = self.rnn.apply(inputs=u, iterate=False, states=h, cells=c)
         return h, c, location, scale, patch, mean_savings
 
-def construct_cnn_layer(name, layer_spec):
+def construct_cnn_layer(name, layer_spec, batch_normalize):
     type_ = layer_spec.pop("type", "conv")
     if type_ == "pool":
         layer = MaxPooling(
@@ -187,23 +192,33 @@ def construct_cnn_layer(name, layer_spec):
             pooling_size=layer_spec.pop("size", (1, 1)),
             step=layer_spec.pop("step", (1, 1)))
     elif type_ == "conv":
+        border_mode = layer_spec.pop("border_mode", (0, 0))
+        if not isinstance(border_mode, basestring):
+            # conv bricks barf on list-type shape arguments :/
+            border_mode = tuple(border_mode)
+        activation = NormalizedActivation(
+            name="activation",
+            batch_normalize=batch_normalize)
         layer = ConvolutionalActivation(
             name=name,
-            activation=Rectifier().apply,
-            filter_size=layer_spec.pop("size", (1, 1)),
-            step=layer_spec.pop("step", (1, 1)),
+            activation=activation.apply,
+            # our activation function will handle the bias
+            use_bias=False,
+            filter_size=tuple(layer_spec.pop("size", (1, 1))),
+            step=tuple(layer_spec.pop("step", (1, 1))),
             num_filters=layer_spec.pop("num_filters", 1),
-            border_mode=layer_spec.pop("border_mode", (0, 0)))
+            border_mode=border_mode)
     if layer_spec:
         logger.warn("ignoring unknown layer specification keys [%s]"
                     % " ".join(layer_spec.keys()))
     return layer
 
-def construct_cnn(name, layer_specs, n_channels, input_shape):
+def construct_cnn(name, layer_specs, n_channels, input_shape, batch_normalize):
     cnn = ConvolutionalSequence(
         name=name,
         layers=[construct_cnn_layer("patch_conv_%i" % i,
-                                    layer_spec)
+                                    layer_spec,
+                                    batch_normalize=batch_normalize)
                 for i, layer_spec in enumerate(layer_specs)],
         num_channels=n_channels,
         image_size=tuple(input_shape))
@@ -218,19 +233,78 @@ def construct_cnn(name, layer_specs, n_channels, input_shape):
             std=np.sqrt(2./(np.prod(layer.filter_size) * prev_num_filters)))
         layer.biases_init = Constant(0)
         prev_num_filters = layer.num_filters
+    # tell the activations what shapes they'll be dealing with
+    for layer in cnn.layers:
+        activation = layer.application_methods[-1].brick
+        activation.shape = layer.get_dim("output")
+        activation.broadcastable = [False] + len(input_shape)*[True]
     cnn.initialize()
     return cnn
 
-def construct_mlp(name, hidden_dims, input_dim, initargs):
+def construct_mlp(name, hidden_dims, input_dim, initargs, batch_normalize):
     if not hidden_dims:
         return FeedforwardIdentity(dim=input_dim)
     dims = [input_dim] + hidden_dims
-    activations = [Rectifier() for i in xrange(len(hidden_dims))]
+    activations = [
+        NormalizedActivation(
+            shape=[hidden_dim],
+            name="activation_%i" % i,
+            batch_normalize=batch_normalize)
+        for i, hidden_dim in enumerate(hidden_dims)]
     mlp = MLP(name=name,
               activations=activations,
               dims=dims,
               **initargs)
+    # biases are handled by our activation function
+    for layer in mlp.linear_transformations:
+        layer.use_bias = False
     return mlp
+
+class NormalizedActivation(Initializable, Feedforward):
+    @lazy(allocation="shape broadcastable".split())
+    def __init__(self, shape, broadcastable, activation=None, batch_normalize=False, **kwargs):
+        super(NormalizedActivation, self).__init__(**kwargs)
+        self.shape = shape
+        self.broadcastable = broadcastable
+        self.activation = activation or Rectifier()
+        self.batch_normalize = batch_normalize
+
+    @property
+    def broadcastable(self):
+        return self._broadcastable or [False]*len(self.shape)
+
+    @broadcastable.setter
+    def broadcastable(self, broadcastable):
+        self._broadcastable = broadcastable
+
+    def _allocate(self):
+        arghs = dict(shape=self.shape,
+                     broadcastable=self.broadcastable)
+        sequence = []
+        if self.batch_normalize:
+            sequence.append(Standardization(**arghs))
+            sequence.append(SharedScale(
+                weights_init=Constant(1),
+                **arghs))
+        sequence.append(SharedShift(
+            biases_init=Constant(0),
+            **arghs))
+        sequence.append(self.activation)
+        self.sequence = FeedforwardSequence([
+            brick.apply for brick in sequence
+        ], name="ffs")
+        self.children = [self.sequence]
+
+    @application(inputs=["input_"], outputs=["output"])
+    def apply(self, input_):
+        return self.sequence.apply(input_)
+
+    def get_dim(self, name):
+        try:
+            return dict(input_=self.shape,
+                        output=self.shape)
+        except:
+            return super(NormalizedActivation, self).get_dim(name)
 
 class FeedforwardFlattener(Flattener, Feedforward):
     def __init__(self, input_shape, **kwargs):
@@ -261,3 +335,109 @@ class FeedforwardIdentity(Feedforward):
     @application(inputs=["x"], outputs=["x"])
     def apply(self, x):
         return x
+
+class SharedScale(Initializable, Feedforward):
+    """
+    Element-wise scaling with optional parameter-sharing across axes.
+    """
+    @lazy(allocation="shape broadcastable".split())
+    def __init__(self, shape, broadcastable, **kwargs):
+        super(SharedScale, self).__init__(**kwargs)
+        self.shape = shape
+        self.broadcastable = broadcastable
+
+    def _allocate(self):
+        parameter_shape = [1 if broadcast else dim
+                           for dim, broadcast in zip(self.shape, self.broadcastable)]
+        self.w = shared_floatx_nans(parameter_shape, name='w')
+        add_role(self.w, WEIGHT)
+        self.parameters.append(self.w)
+        self.add_auxiliary_variable(self.w.norm(2), name='w_norm')
+
+    def _initialize(self):
+        self.weights_init.initialize(self.w, self.rng)
+
+    @application(inputs=['input_'], outputs=['output'])
+    def apply(self, input_):
+        return input_ * T.patternbroadcast(self.w, self.broadcastable)
+
+    def get_dim(self, name):
+        if name == 'input_':
+            return self.shape
+        if name == 'output':
+            return self.shape
+        return super(SharedScale, self).get_dim(name)
+
+class SharedShift(Initializable, Feedforward):
+    """
+    Element-wise bias with optional parameter-sharing across axes.
+    """
+    @lazy(allocation="shape broadcastable".split())
+    def __init__(self, shape, broadcastable, **kwargs):
+        super(SharedShift, self).__init__(**kwargs)
+        self.shape = shape
+        self.broadcastable = broadcastable
+
+    def _allocate(self):
+        parameter_shape = [1 if broadcast else dim
+                           for dim, broadcast in zip(self.shape, self.broadcastable)]
+        self.b = shared_floatx_nans(parameter_shape, name='b')
+        add_role(self.b, BIAS)
+        self.parameters.append(self.b)
+        self.add_auxiliary_variable(self.b.norm(2), name='b_norm')
+
+    def _initialize(self):
+        self.biases_init.initialize(self.b, self.rng)
+
+    @application(inputs=['input_'], outputs=['output'])
+    def apply(self, input_):
+        return input_ + T.patternbroadcast(self.b, self.broadcastable)
+
+    def get_dim(self, name):
+        if name == 'input_':
+            return self.shape
+        if name == 'output':
+            return self.shape
+        return super(SharedShift, self).get_dim(name)
+
+# TODO: replacement of batch/population statistics by annotations
+# TODO: depends on replacements inside scan
+class Standardization(Initializable, Feedforward):
+    stats = "mean var".split()
+
+    def __init__(self, shape, broadcastable, alpha=1e-2, **kwargs):
+        super(Standardization, self).__init__(**kwargs)
+        self.shape = shape
+        self.broadcastable = broadcastable
+        self.alpha = alpha
+
+    def _allocate(self):
+        parameter_shape = [1 if broadcast else dim
+                           for dim, broadcast in zip(self.shape, self.broadcastable)]
+        self.population_stats = dict(
+            (stat, shared_floatx_nans(parameter_shape,
+                                      name="population_%s" % stat))
+            for stat in self.stats)
+
+    def _initialize(self):
+        for stat, initialization in (("mean", 0), ("var",  1)):
+            self.population_stats[stat].get_value().fill(initialization)
+
+    @application
+    def apply(self, input_):
+        aggregate_axes = [0] + [1 + i for i, b in enumerate(self.broadcastable) if b]
+        self.batch_stats = dict(
+            (stat, getattr(input_, stat)(axis=aggregate_axes,
+                                         keepdims=True)[0])
+            for stat in self.stats)
+
+        # NOTE: these are unused for now
+        self._updates = [(self.population_stats[stat],
+                          (1 - self.alpha)*self.population_stats[stat]
+                          + self.alpha*self.batch_stats[stat])
+                         for stat in self.stats]
+        self._replacements = [(self.batch_stats[stat], self.population_stats[stat])
+                              for stat in self.stats]
+
+        return ((input_ - self.batch_stats["mean"])
+                / (T.sqrt(self.batch_stats["var"] + 1e-8)))
