@@ -13,9 +13,12 @@ from blocks.roles import add_role, WEIGHT, BIAS
 from blocks.bricks.parallel import Fork, Merge, Parallel
 from blocks.bricks.recurrent import BaseRecurrent, recurrent, LSTM
 from blocks.bricks import Linear, Rectifier, Initializable, MLP, FeedforwardSequence, Feedforward, Bias, Activation
-from blocks.bricks.conv import ConvolutionalSequence, ConvolutionalActivation, MaxPooling, Flattener
 from blocks.initialization import Constant, IsotropicGaussian
 from blocks.utils import shared_floatx_nans
+from blocks.bricks.conv import Flattener
+
+import blocks.bricks.conv as conv2d
+import conv3d
 
 from util import NormalizedInitialization
 
@@ -184,28 +187,28 @@ class RecurrentAttentionModel(BaseRecurrent):
         h, c = self.rnn.apply(inputs=u, iterate=False, states=h, cells=c)
         return h, c, location, scale, patch, mean_savings
 
-def construct_cnn_layer(name, layer_spec, batch_normalize):
+def construct_cnn_layer(name, layer_spec, conv_module, ndim, batch_normalize):
     type_ = layer_spec.pop("type", "conv")
     if type_ == "pool":
-        layer = MaxPooling(
+        layer = conv_module.MaxPooling(
             name=name,
-            pooling_size=layer_spec.pop("size", (1, 1)),
-            step=layer_spec.pop("step", (1, 1)))
+            pooling_size=layer_spec.pop("size", (1,) * ndim),
+            step=layer_spec.pop("step", (1,) * ndim))
     elif type_ == "conv":
-        border_mode = layer_spec.pop("border_mode", (0, 0))
+        border_mode = layer_spec.pop("border_mode", (0,) * ndim)
         if not isinstance(border_mode, basestring):
             # conv bricks barf on list-type shape arguments :/
             border_mode = tuple(border_mode)
         activation = NormalizedActivation(
             name="activation",
             batch_normalize=batch_normalize)
-        layer = ConvolutionalActivation(
+        layer = conv_module.ConvolutionalActivation(
             name=name,
             activation=activation.apply,
             # our activation function will handle the bias
             use_bias=False,
-            filter_size=tuple(layer_spec.pop("size", (1, 1))),
-            step=tuple(layer_spec.pop("step", (1, 1))),
+            filter_size=tuple(layer_spec.pop("size", (1,) * ndim)),
+            step=tuple(layer_spec.pop("step", (1,) * ndim)),
             num_filters=layer_spec.pop("num_filters", 1),
             border_mode=border_mode)
     if layer_spec:
@@ -214,10 +217,16 @@ def construct_cnn_layer(name, layer_spec, batch_normalize):
     return layer
 
 def construct_cnn(name, layer_specs, n_channels, input_shape, batch_normalize):
-    cnn = ConvolutionalSequence(
+    ndim = len(input_shape)
+    conv_module = {
+        2: conv2d,
+        3: conv3d,
+    }[ndim]
+    cnn = conv_module.ConvolutionalSequence(
         name=name,
         layers=[construct_cnn_layer("patch_conv_%i" % i,
-                                    layer_spec,
+                                    layer_spec, ndim=ndim,
+                                    conv_module=conv_module,
                                     batch_normalize=batch_normalize)
                 for i, layer_spec in enumerate(layer_specs)],
         num_channels=n_channels,
@@ -235,9 +244,14 @@ def construct_cnn(name, layer_specs, n_channels, input_shape, batch_normalize):
         prev_num_filters = layer.num_filters
     # tell the activations what shapes they'll be dealing with
     for layer in cnn.layers:
-        activation = layer.application_methods[-1].brick
-        activation.shape = layer.get_dim("output")
-        activation.broadcastable = [False] + len(input_shape)*[True]
+        # woe is me
+        try:
+            activation = layer.application_methods[-1].brick
+        except:
+            continue
+        if isinstance(activation, NormalizedActivation):
+            activation.shape = layer.get_dim("output")
+            activation.broadcastable = [False] + len(input_shape)*[True]
     cnn.initialize()
     return cnn
 
