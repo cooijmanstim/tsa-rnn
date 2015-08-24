@@ -251,7 +251,7 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
     model.initialize()
 
     hs, cs, locations, scales, patches, mean_savings = model.compute(x, n_patches)
-    cost = model.emitter.cost(cs, y, n_patches)
+    cost = model.emitter.cost(hs, y, n_patches)
     cost.name = "cost"
 
     # get patches from original (uncentered) images

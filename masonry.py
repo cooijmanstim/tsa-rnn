@@ -176,7 +176,7 @@ class RecurrentAttentionModel(BaseRecurrent):
     @recurrent(sequences=["location_noises", "scale_noises"], contexts=['x'], states="h c".split(),
                outputs="h c location scale patch mean_savings".split())
     def apply(self, x, h, c, location_noises, scale_noises):
-        u, location, scale, patch, mean_savings = self.attention.apply(x, c, location_noises, scale_noises)
+        u, location, scale, patch, mean_savings = self.attention.apply(x, h, location_noises, scale_noises)
         h, c = self.rnn.apply(inputs=u, iterate=False, states=h, cells=c)
         return h, c, location, scale, patch, mean_savings
 
