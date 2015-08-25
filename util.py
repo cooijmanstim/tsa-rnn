@@ -1,3 +1,6 @@
+import logging
+logger = logging.getLogger(__name__)
+
 import itertools as it
 import numbers
 from theano.compile import ViewOp
@@ -65,7 +68,7 @@ class Channels(object):
                 # name not unique; uniquefy
                 for i, quantity in enumerate(quantities):
                     channels.append(named_copy(
-                        quantity, "%s[%i]" % (i, quantity.name)))
+                        quantity, "%s[%i]" % (quantity.name, i)))
         return channels
 
 # L1-normalize along an axis (default: normalize columns, which for
@@ -113,3 +116,54 @@ def batched_tensordot(a, b, axes=2):
         a, b, axes,
         dot=theano.sandbox.cuda.blas.batched_dot,
         batched=True)
+
+import theano.printing
+from blocks.filter import VariableFilter
+import numpy as np
+
+def get_recurrent_auxiliaries(names, graph, n_steps=None):
+    variables = []
+    for name in names:
+        steps = VariableFilter(name=name)(graph.auxiliary_variables)
+
+        if n_steps is not None:
+            assert len(steps) == n_steps
+
+        # a super crude sanity check to ensure these auxiliaries are
+        # actually in chronological order
+        assert all(_a < _b for _a, _b in 
+                   (lambda _xs: zip(_xs, _xs[1:]))
+                   ([len(theano.printing.debugprint(step, file="str"))
+                     for step in steps]))
+
+        variable = T.stack(*steps)
+        # move batch axis before rnn time axis
+        variable = variable.dimshuffle(1, 0, *range(2, variable.ndim))
+        variables.append(variable)
+    return variables
+
+from blocks.bricks.base import Brick, ApplicationCall
+
+# attempt to fully qualify an annotated variable
+def get_path(x):
+    if isinstance(x, (T.TensorVariable, T.sharedvar.TensorSharedVariable)):
+        paths = list(set(map(get_path, x.tag.annotations)))
+        if len(paths) > 1:
+            logger.warning(
+                "get_path: variable %s has multiple possible origins, using first of [%s]"
+                % (x.tag.name, " ".join(paths)))
+        return paths[0] + "/" + x.tag.name
+    elif isinstance(x, Brick):
+        if x.parents:
+            paths = list(set(map(get_path, x.parents)))
+            if len(paths) > 1:
+                logger.warning(
+                    "get_path: brick %s has multiple parents, using first of [%s]"
+                    % (x.tag.name, " ".join(paths)))
+            return paths[0] + "/" + x.name
+        else:
+            return "/" + x.name
+    elif isinstance(x, ApplicationCall):
+        return get_path(x.application.brick)
+    else:
+        raise TypeError()

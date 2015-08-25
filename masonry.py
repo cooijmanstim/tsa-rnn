@@ -72,7 +72,7 @@ class Merger(Initializable):
 
 class Locator(Initializable):
     def __init__(self, input_dim, n_spatial_dims, area_transform,
-                 weights_init, biases_init, **kwargs):
+                 weights_init, biases_init, location_std, scale_std, **kwargs):
         super(Locator, self).__init__(**kwargs)
 
         self.n_spatial_dims = n_spatial_dims
@@ -87,14 +87,21 @@ class Locator(Initializable):
             biases_init=Constant(0),
             name="locationscale")
 
+        self.T_rng = theano.sandbox.rng_mrg.MRG_RandomStreams(12345)
+        self.location_std = location_std
+        self.scale_std = scale_std
+
         self.children = [self.area_transform.brick, self.locationscale]
 
     @application(inputs=['h'], outputs=['location', 'scale'])
     def apply(self, h):
         area = self.area_transform(h)
         locationscale = self.locationscale.apply(area)
-        return (locationscale[:, :self.n_spatial_dims],
-                locationscale[:, self.n_spatial_dims:])
+        location, scale = (locationscale[:, :self.n_spatial_dims],
+                           locationscale[:, self.n_spatial_dims:])
+        location += self.T_rng.normal(location.shape, std=self.location_std)
+        scale += self.T_rng.normal(scale.shape, std=self.scale_std)
+        return location, scale
 
 # this belongs on SpatialAttention as a static method, but that breaks pickling
 def static_map_to_input_space(location, scale, patch_shape, image_shape):
@@ -132,26 +139,29 @@ class SpatialAttention(Brick):
         scale = T.zeros_like(location)
         return location, scale
 
-    @application(inputs=['x', 'h', 'location_noise', 'scale_noise'], outputs=['u', 'location', 'scale', 'patch', 'mean_savings'])
-    def apply(self, x, h, location_noise, scale_noise):
+    @application(inputs=['x', 'h'], outputs=['u'])
+    def apply(self, x, h):
         location, scale = self.locator.apply(h)
-        location += location_noise
-        scale += scale_noise
-        patch, mean_savings = self.crop(x, location, scale)
+        patch = self.crop(x, location, scale)
         u = self.merger.apply(patch, location, scale)
-        return u, location, scale, patch, mean_savings
+        return u
 
     def crop(self, x, location, scale):
         true_location, true_scale = self.map_to_input_space(location, scale)
-        patch, mean_savings = self.cropper.apply(x, true_location, true_scale)
-        return patch, mean_savings
+        patch = self.cropper.apply(x, true_location, true_scale)
+        self.add_auxiliary_variable(location, name="location")
+        self.add_auxiliary_variable(scale, name="scale")
+        self.add_auxiliary_variable(true_location, name="true_location")
+        self.add_auxiliary_variable(true_scale, name="true_scale")
+        self.add_auxiliary_variable(patch, name="patch")
+        return patch
 
-    @application(inputs=['x'], outputs="u0 location0 scale0 patch0 mean_savings0".split())
+    @application(inputs=['x'], outputs="u".split())
     def compute_initial_input(self, x):
         location, scale = self.compute_initial_location_scale(x)
-        patch, mean_savings = self.crop(x, location, scale)
+        patch = self.crop(x, location, scale)
         u = self.merger.apply(patch, location, scale)
-        return u, location, scale, patch, mean_savings
+        return u
 
 class RecurrentAttentionModel(BaseRecurrent):
     def __init__(self, rnn, attention, emitter, **kwargs):
@@ -173,19 +183,18 @@ class RecurrentAttentionModel(BaseRecurrent):
         except KeyError:
             return super(RecurrentAttentionModel, self).get_dim(name)
 
-    @recurrent(sequences=["location_noises", "scale_noises"], contexts=['x'], states="h c".split(),
-               outputs="h c location scale patch mean_savings".split())
-    def apply(self, x, h, c, location_noises, scale_noises):
-        u, location, scale, patch, mean_savings = self.attention.apply(x, h, location_noises, scale_noises)
+    @application(inputs="x h c".split(), outputs="h c".split())
+    def apply(self, x, h, c):
+        u = self.attention.apply(x, h)
         h, c = self.rnn.apply(inputs=u, iterate=False, states=h, cells=c)
-        return h, c, location, scale, patch, mean_savings
+        return h, c
 
-    @application(inputs=['x'], outputs="h0 c0 location0 scale0 patch0 mean_savings0".split())
+    @application(inputs=['x'], outputs="h c".split())
     def compute_initial_state(self, x):
-        u, location, scale, patch, mean_savings = self.attention.compute_initial_input(x)
+        u = self.attention.compute_initial_input(x)
         h, c = self.rnn.initial_states(x.shape[0])
         h, c = self.rnn.apply(inputs=u, iterate=False, states=h, cells=c)
-        return h, c, location, scale, patch, mean_savings
+        return h, c
 
 def construct_cnn_layer(name, layer_spec, conv_module, ndim, batch_normalize):
     type_ = layer_spec.pop("type", "conv")

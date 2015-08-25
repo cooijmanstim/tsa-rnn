@@ -74,7 +74,7 @@ class LocallySoftRectangularCropper(Brick):
 
         return a, b
 
-    @application(inputs=['image', 'location', 'scale'], outputs=['patch', 'mean_savings'])
+    @application(inputs=['image', 'location', 'scale'], outputs=['patch'])
     def apply(self, image, location, scale):
         a, b = self.compute_hard_windows(location, scale)
 
@@ -95,10 +95,10 @@ class LocallySoftRectangularCropper(Brick):
             patch, _ = theano.map(map_fn,
                                   sequences=[image, a, b, location, scale])
 
-        mean_savings = (1 - T.cast((b - a).prod(axis=1), floatX) / self.image_shape.prod()).mean(axis=0)
-        self.add_auxiliary_variable(mean_savings, name="mean_savings")
+        savings = (1 - T.cast((b - a).prod(axis=1), floatX) / self.image_shape.prod())
+        self.add_auxiliary_variable(savings, name="savings")
 
-        return patch, mean_savings
+        return patch
 
     def apply_inner(self, image, location, scale, a, b):
         slices = [theano.gradient.disconnected_grad(T.arange(a[i], b[i]))
@@ -159,13 +159,14 @@ class SoftRectangularCropper(Brick):
             Ws.append(self.kernel.density(dx2, scale))
         return Ws
 
-    @application(inputs=['image', 'location', 'scale'], outputs=['patch', 'mean_savings'])
+    @application(inputs=['image', 'location', 'scale'], outputs=['patch'])
     def apply(self, image, location, scale):
         matrices = self.compute_crop_matrices(location, scale)
         patch = image
         for axis, matrix in enumerate(matrices):
             patch = util.batched_tensordot(patch, matrix, [[2], [1]])
-        return patch, T.constant(0)
+        self.add_auxiliary_variable(T.constant(0.), name="mean_savings")
+        return patch
 
 class Gaussian(object):
     def density(self, x2, scale):
@@ -214,7 +215,7 @@ if __name__ == "__main__":
     locations = (np.ones((n_patches, batch_size, 2)) * image_shape/2).astype(np.float32)
     scales = np.tile(scales[:, np.newaxis, np.newaxis], (1, batch_size, 2)).astype(np.float32)
 
-    Tpatches = T.stack(*[cropper.apply(x_uncentered, T.constant(location), T.constant(scale))[0]
+    Tpatches = T.stack(*[cropper.apply(x_uncentered, T.constant(location), T.constant(scale))
                          for location, scale in zip(locations, scales)])
 
     patches = theano.function([x_uncentered], Tpatches)(batch["features"])

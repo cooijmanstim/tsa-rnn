@@ -20,7 +20,9 @@ from blocks.main_loop import MainLoop
 from blocks.extensions import FinishAfter, Printing, ProgressBar, Timing
 from blocks.bricks import Tanh, FeedforwardSequence
 from blocks.bricks.recurrent import LSTM
+from blocks.roles import OUTPUT
 from blocks.graph import ComputationGraph
+from blocks.filter import VariableFilter
 from blocks.extras.extensions.plot import Plot
 
 import masonry
@@ -43,9 +45,6 @@ class Ram(object):
                  postmerge_area_transform, patch_transform, batch_normalize,
                  response_transform, location_std, scale_std, cutoff,
                  batched_window, initargs, emitter, **kwargs):
-        self.rng = theano.sandbox.rng_mrg.MRG_RandomStreams(12345)
-        self.location_std = location_std
-        self.scale_std = scale_std
         self.rnn = LSTM(activation=Tanh(),
                         dim=hidden_dim,
                         name="recurrent",
@@ -53,6 +52,8 @@ class Ram(object):
                         biases_init=Constant(0))
         self.locator = masonry.Locator(hidden_dim, n_spatial_dims,
                                        area_transform=prefork_area_transform,
+                                       location_std=location_std,
+                                       scale_std=scale_std,
                                        **initargs)
         self.cropper = crop.LocallySoftRectangularCropper(
             n_spatial_dims=n_spatial_dims,
@@ -80,29 +81,15 @@ class Ram(object):
         Identity().initialize(self.rnn.W_state, self.rnn.rng)
 
     def compute(self, x, n_patches):
-        initial_outputs = self.model.compute_initial_state(x)
+        states = []
+        states.append(self.model.compute_initial_state(x, as_dict=True))
         n_steps = n_patches - 1
-        location_noises = self.rng.normal(
-            [n_steps, initial_outputs[2].shape[0], initial_outputs[2].shape[1]],
-            std=self.location_std)
-        scale_noises = self.rng.normal(
-            [n_steps, initial_outputs[3].shape[0], initial_outputs[3].shape[1]],
-            std=self.scale_std)
-        step_outputs = self.model.apply(x=x,
-                                        h=initial_outputs[0],
-                                        c=initial_outputs[1],
-                                        location_noises=location_noises,
-                                        scale_noises=scale_noises)
-        # prepend initial values
-        step_outputs = [T.concatenate([T.shape_padleft(initial_output), step_output], axis=0)
-                        for initial_output, step_output in zip(initial_outputs, step_outputs)]
-        # mean_savings is special; it has no batch axis
-        mean_savings = step_outputs.pop()
-        # move batch axis in front of RNN time axis
-        step_outputs = [step_output.dimshuffle(1, 0, *range(step_output.ndim)[2:])
-                        for step_output in step_outputs]
-        step_outputs.append(mean_savings)
-        return step_outputs
+        for i in xrange(n_steps):
+            states.append(self.model.apply(x=x, as_dict=True, **states[-1]))
+        outputs = T.concatenate([state["h"][:, np.newaxis, :]
+                                 for state in states],
+                                axis=1)
+        return outputs
 
 def get_task(task_name, hyperparameters, **kwargs):
     klass = dict(mnist=mnist.Task,
@@ -169,43 +156,47 @@ def construct_model(task, patch_shape, initargs, n_channels, n_spatial_dims, hid
                emitter=emitter,
                **hyperparameters)
 
-def construct_monitors(algorithm, task, n_patches, x, x_uncentered,
-                       hs, cs, locations, scales, patches, mean_savings,
-                       graph, plot_url, name, model, cost, n_spatial_dims,
-                       patchmonitor_interval=100, **kwargs):
+def construct_monitors(algorithm, task, n_patches, x, x_uncentered, hs, 
+                       graph, plot_url, name, ram, model, cost,
+                       n_spatial_dims, patchmonitor_interval=100, **kwargs):
+    location, scale, savings = util.get_recurrent_auxiliaries(
+        "location scale savings".split(), graph, n_patches)
+
     channels = util.Channels()
-    channels.append(util.named(mean_savings.mean(), "mean_savings"))
     channels.extend(task.monitor_channels(graph))
     for i in xrange(n_patches):
-        channels.append(hs[:, i].mean(), "h%i_mean" % i)
-    for i in xrange(n_patches):
-        channels.append(cs[:, i].mean(), "c%i_mean" % i)
+        channels.append(hs[:, i].mean(), "h%i.mean" % i)
 
-    for variable_name in "locations scales".split():
+    channels.append(util.named(savings.mean(), "savings.mean"))
+
+    for variable_name in "location scale".split():
         variable = locals()[variable_name]
         channels.append(variable.var(axis=0).mean(),
-                        "%s_variance_across_batch" % variable_name)
+                        "%s.batch_variance" % variable_name)
         channels.append(variable.var(axis=1).mean(),
-                        "%s_variance_across_time" % variable_name)
+                        "%s.time_variance" % variable_name)
 
-    step_norms = util.Channels()
-    step_norms.extend(util.named(l2_norm([algorithm.steps[param]]),
-                                 "step_norm_%s" % name)
-                      for name, param in model.get_parameter_dict().items())
-    step_channels = step_norms.get_channels()
-    #for activation in VariableFilter(roles=[OUTPUT])(graph.variables):
-    #    quantity = activation.mean()
-    #    quantity.name = "%s_mean" % activation.name
-    #    channels.append(quantity)
+    #step_norms = util.Channels()
+    #step_norms.extend(util.named(l2_norm([algorithm.steps[param]]),
+    #                             "%s.step_norm" % name)
+    #                  for name, param in model.get_parameter_dict().items())
+    #step_channels = step_norms.get_channels()
+
+    for activation in VariableFilter(roles=[OUTPUT])(graph.variables):
+        quantity = activation.mean()
+        quantity.name = "%s.mean" % util.get_path(activation)
+        channels.append(quantity)
 
     extensions = []
-    extensions.append(TrainingDataMonitoring(
-        step_channels,
-        prefix="train", after_epoch=True))
+
+    #extensions.append(TrainingDataMonitoring(
+    #    step_channels,
+    #    prefix="train", after_epoch=True))
+
     extensions.extend(DataStreamMonitoring((channels.get_channels() + [cost]),
-                                         data_stream=task.get_stream(which),
-                                         prefix=which, after_epoch=True)
-                    for which in "train valid test".split())
+                                           data_stream=task.get_stream(which),
+                                           prefix=which, after_epoch=True)
+                      for which in "train valid test".split())
 
     patchmonitor = None
     if n_spatial_dims == 2:
@@ -214,20 +205,26 @@ def construct_monitors(algorithm, task, n_patches, x, x_uncentered,
         patchmonitor_klass = VideoPatchMonitoring
 
     if patchmonitor_klass:
+        # get patches from original (uncentered) images
+        patch = T.stack(*[ram.attention.crop(x_uncentered, location[:, i, :], scale[:, i, :])
+                          for i in xrange(n_patches)])
+        patch = patch.dimshuffle(1, 0, *range(2, patch.ndim))
+
         patchmonitor = patchmonitor_klass(
             task.get_stream("valid", SequentialScheme(5, 5)),
             every_n_batches=patchmonitor_interval,
-            extractor=theano.function([x_uncentered], [locations, scales, patches]),
+            extractor=theano.function([x_uncentered], [location, scale, patch]),
             map_to_input_space=masonry.static_map_to_input_space)
         patchmonitor.save_patches("test.png")
         extensions.append(patchmonitor)
 
-    step_plots = [["train_%s" % step_channel.name for step_channel in step_channels]]
-    extensions.append(Plot(
-        name,
-        channels=(task.plot_channels() + [['train_cost']] + step_plots),
-        after_epoch=True,
-        server_url=plot_url))
+    plot_channels = []
+    plot_channels.extend(task.plot_channels())
+    plot_channels.append(["train_cost"])
+    #plot_channels.append(["train_%s" % step_channel.name for step_channel in step_channels])
+
+    extensions.append(Plot(name, channels=plot_channels,
+                           after_epoch=True, server_url=plot_url))
 
     return extensions
 
@@ -247,18 +244,12 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
     # this is a theano variable; it may depend on the batch
     hyperparameters["image_shape"] = x.shape[-n_spatial_dims:]
 
-    model = construct_model(task=task, **hyperparameters)
-    model.initialize()
+    ram = construct_model(task=task, **hyperparameters)
+    ram.initialize()
 
-    hs, cs, locations, scales, patches, mean_savings = model.compute(x, n_patches)
-    cost = model.emitter.cost(hs, y, n_patches)
+    hs = ram.compute(x, n_patches)
+    cost = ram.emitter.cost(hs, y, n_patches)
     cost.name = "cost"
-
-    # get patches from original (uncentered) images
-    patches = T.stack(*[model.attention.crop(x_uncentered, locations[:, i, :], scales[:, i, :])[0]
-                        for i in xrange(n_patches)])
-    # zzz
-    patches = patches.dimshuffle(1, 0, *range(2, patches.ndim))
 
     print "setting up main loop..."
     graph = ComputationGraph(cost)
@@ -267,10 +258,9 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
                                 parameters=graph.parameters,
                                 step_rule=Adam(learning_rate=learning_rate))
     monitors = construct_monitors(
-        x=x, x_uncentered=x_uncentered, y=y, hs=hs, cs=cs, cost=cost,
-        locations=locations, scales=scales, patches=patches, mean_savings=mean_savings,
+        x=x, x_uncentered=x_uncentered, y=y, hs=hs, cost=cost,
         algorithm=algorithm, task=task, model=uselessflunky,
-        graph=graph, **hyperparameters)
+        ram=ram, graph=graph, **hyperparameters)
     main_loop = MainLoop(data_stream=task.get_stream("train"),
                          algorithm=algorithm,
                          extensions=(monitors +
@@ -287,6 +277,7 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
 
 if __name__ == "__main__":
     logging.basicConfig()
+    logger = logging.getLogger(__name__)
 
     import argparse
 
