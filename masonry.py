@@ -372,17 +372,17 @@ class SharedScale(Initializable, Feedforward):
     def _allocate(self):
         parameter_shape = [1 if broadcast else dim
                            for dim, broadcast in zip(self.shape, self.broadcastable)]
-        self.w = shared_floatx_nans(parameter_shape, name='w')
-        add_role(self.w, WEIGHT)
-        self.parameters.append(self.w)
-        self.add_auxiliary_variable(self.w.norm(2), name='w_norm')
+        self.gamma = shared_floatx_nans(parameter_shape, name='gamma')
+        add_role(self.gamma, WEIGHT)
+        self.parameters.append(self.gamma)
+        self.add_auxiliary_variable(self.gamma.norm(2), name='gamma_norm')
 
     def _initialize(self):
-        self.weights_init.initialize(self.w, self.rng)
+        self.weights_init.initialize(self.gamma, self.rng)
 
     @application(inputs=['input_'], outputs=['output'])
     def apply(self, input_):
-        return input_ * T.patternbroadcast(self.w, self.broadcastable)
+        return input_ * T.patternbroadcast(self.gamma, self.broadcastable)
 
     def get_dim(self, name):
         if name == 'input_':
@@ -404,17 +404,17 @@ class SharedShift(Initializable, Feedforward):
     def _allocate(self):
         parameter_shape = [1 if broadcast else dim
                            for dim, broadcast in zip(self.shape, self.broadcastable)]
-        self.b = shared_floatx_nans(parameter_shape, name='b')
-        add_role(self.b, BIAS)
-        self.parameters.append(self.b)
-        self.add_auxiliary_variable(self.b.norm(2), name='b_norm')
+        self.beta = shared_floatx_nans(parameter_shape, name='beta')
+        add_role(self.beta, BIAS)
+        self.parameters.append(self.beta)
+        self.add_auxiliary_variable(self.beta.norm(2), name='beta_norm')
 
     def _initialize(self):
-        self.biases_init.initialize(self.b, self.rng)
+        self.biases_init.initialize(self.beta, self.rng)
 
     @application(inputs=['input_'], outputs=['output'])
     def apply(self, input_):
-        return input_ + T.patternbroadcast(self.b, self.broadcastable)
+        return input_ + T.patternbroadcast(self.beta, self.broadcastable)
 
     def get_dim(self, name):
         if name == 'input_':
@@ -446,7 +446,7 @@ class Standardization(Initializable, Feedforward):
         for stat, initialization in (("mean", 0), ("var",  1)):
             self.population_stats[stat].get_value().fill(initialization)
 
-    @application
+    @application(inputs=["input_"], outputs=["output"])
     def apply(self, input_):
         aggregate_axes = [0] + [1 + i for i, b in enumerate(self.broadcastable) if b]
         self.batch_stats = dict(

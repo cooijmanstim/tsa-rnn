@@ -182,10 +182,16 @@ def construct_monitors(algorithm, task, n_patches, x, x_uncentered, hs,
     #                  for name, param in model.get_parameter_dict().items())
     #step_channels = step_norms.get_channels()
 
-    for activation in VariableFilter(roles=[OUTPUT])(graph.variables):
-        quantity = activation.mean()
-        quantity.name = "%s.mean" % util.get_path(activation)
-        channels.append(quantity)
+    #for activation in VariableFilter(roles=[OUTPUT])(graph.variables):
+    #    quantity = activation.mean()
+    #    quantity.name = "%s.mean" % util.get_path(activation)
+    #    channels.append(quantity)
+
+    for parameter_name in "gamma beta".split():
+        for parameter in VariableFilter(name=parameter_name)(graph.auxiliary_variables):
+            quantity = parameter.mean()
+            quantity.name = "%s.mean" % util.get_path(parameter)
+            channels.append(quantity)
 
     extensions = []
 
