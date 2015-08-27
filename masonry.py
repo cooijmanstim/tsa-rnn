@@ -167,9 +167,6 @@ class RecurrentAttentionModel(BaseRecurrent):
     def __init__(self, rnn, attention, emitter, **kwargs):
         super(RecurrentAttentionModel, self).__init__(**kwargs)
 
-        # life's too short to try to reconcile the differences between LSTM and plain RNN interfaces
-        assert isinstance(rnn, LSTM)
-
         self.rnn = rnn
         self.attention = attention
         self.emitter = emitter

@@ -29,6 +29,7 @@ import masonry
 import crop
 import util
 from patchmonitor import PatchMonitoring, VideoPatchMonitoring
+import lstm
 
 import mnist
 import cluttered_mnist_video
@@ -45,6 +46,7 @@ class Ram(object):
                  postmerge_area_transform, patch_transform, batch_normalize,
                  response_transform, location_std, scale_std, cutoff,
                  batched_window, initargs, emitter, **kwargs):
+        LSTM = lstm.get_implementation(batch_normalize)
         self.rnn = LSTM(activation=Tanh(),
                         dim=hidden_dim,
                         name="recurrent",
