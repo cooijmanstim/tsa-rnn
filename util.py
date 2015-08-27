@@ -146,20 +146,24 @@ from blocks.bricks.base import Brick, ApplicationCall
 
 # attempt to fully qualify an annotated variable
 def get_path(x):
-    if isinstance(x, (T.TensorVariable, T.sharedvar.TensorSharedVariable)):
+    if isinstance(x, (T.TensorVariable,
+                      # zzzzzzzzzzzzzzzzzzzzzzzzzzz
+                      T.sharedvar.TensorSharedVariable,
+                      T.compile.sharedvalue.SharedVariable)):
         paths = list(set(map(get_path, x.tag.annotations)))
+        name = getattr(x.tag, "name", x.name)
         if len(paths) > 1:
             logger.warning(
                 "get_path: variable %s has multiple possible origins, using first of [%s]"
-                % (x.tag.name, " ".join(paths)))
-        return paths[0] + "/" + x.tag.name
+                % (name, " ".join(paths)))
+        return paths[0] + "/" + name
     elif isinstance(x, Brick):
         if x.parents:
             paths = list(set(map(get_path, x.parents)))
             if len(paths) > 1:
                 logger.warning(
                     "get_path: brick %s has multiple parents, using first of [%s]"
-                    % (x.tag.name, " ".join(paths)))
+                    % (x.name, " ".join(paths)))
             return paths[0] + "/" + x.name
         else:
             return "/" + x.name

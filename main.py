@@ -164,8 +164,9 @@ def construct_monitors(algorithm, task, n_patches, x, x_uncentered, hs,
 
     channels = util.Channels()
     channels.extend(task.monitor_channels(graph))
-    for i in xrange(n_patches):
-        channels.append(hs[:, i].mean(), "h%i.mean" % i)
+
+    #for i in xrange(n_patches):
+    #    channels.append(hs[:, i].mean(), "h%i.mean" % i)
 
     channels.append(util.named(savings.mean(), "savings.mean"))
 
@@ -187,8 +188,8 @@ def construct_monitors(algorithm, task, n_patches, x, x_uncentered, hs,
     #    quantity.name = "%s.mean" % util.get_path(activation)
     #    channels.append(quantity)
 
-    for parameter_name in "gamma beta".split():
-        for parameter in VariableFilter(name=parameter_name)(graph.auxiliary_variables):
+    for parameter in graph.parameters:
+        if parameter.name in "gamma beta".split():
             quantity = parameter.mean()
             quantity.name = "%s.mean" % util.get_path(parameter)
             channels.append(quantity)
@@ -273,7 +274,7 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
                                      [FinishAfter(after_n_epochs=n_epochs),
                                       DumpMinimum(name+'_best', channel_name='valid_error_rate'),
                                       Dump(name+'_dump', every_n_epochs=10),
-                                      Checkpoint(name+'_checkpoint.pkl', every_n_epochs=10, on_interrupt=False),
+                                      #Checkpoint(name+'_checkpoint.pkl', every_n_epochs=10, on_interrupt=False),
                                       ProgressBar(),
                                       Timing(),
                                       Printing(),
