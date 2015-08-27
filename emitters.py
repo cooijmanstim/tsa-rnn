@@ -15,12 +15,13 @@ class SingleSoftmax(Initializable):
         self.n_classes = n_classes
 
         self.mlp = masonry.construct_mlp(
+            name="mlp",
             activations=[None, Identity()],
             input_dim=hidden_dim,
             hidden_dims=[hidden_dim/2, self.n_classes],
             batch_normalize=batch_normalize,
-            weights_init=Orthogonal(),
-            biases_init=Constant(0))
+            initargs=dict(weights_init=Orthogonal(),
+                          biases_init=Constant(0)))
         self.softmax = Softmax()
 
         self.children = [self.mlp, self.softmax]
