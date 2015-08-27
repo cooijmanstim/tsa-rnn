@@ -193,11 +193,12 @@ def construct_monitors(algorithm, task, n_patches, x, x_uncentered, hs,
     #    quantity.name = "%s.mean" % util.get_path(activation)
     #    channels.append(quantity)
 
+    data_independent_channels = util.Channels()
     for parameter in graph.parameters:
         if parameter.name in "gamma beta".split():
             quantity = parameter.mean()
             quantity.name = "%s.mean" % util.get_path(parameter)
-            channels.append(quantity)
+            data_independent_channels.append(quantity)
 
     extensions = []
 
@@ -205,6 +206,8 @@ def construct_monitors(algorithm, task, n_patches, x, x_uncentered, hs,
     #    step_channels,
     #    prefix="train", after_epoch=True))
 
+    extensions.append(DataStreamMonitoring(data_independent_channels.get_channels(),
+                                           data_stream=None, after_epoch=True))
     extensions.extend(DataStreamMonitoring((channels.get_channels() + [cost]),
                                            data_stream=task.get_stream(which),
                                            prefix=which, after_epoch=True)
