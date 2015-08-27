@@ -167,7 +167,7 @@ class MaxPooling(Initializable, Feedforward):
 
         # Pooling on last two dimensions
         input_ = input_.reshape((input_.shape[0], input_.shape[1] * input_.shape[2], input_.shape[3], input_.shape[4]))
-        p = dnn_pool(img=input_, ws=self.pooling_size[1:], stride=self.step[1:])
+        p = dnn_pool(img=input_, ws=tuple(self.pooling_size[1:]), stride=tuple(self.step[1:]))
         p = p.reshape((p.shape[0], input_.shape[1], input_.shape[2], p.shape[2], p.shape[3]))
         # Pooling on first dimension
         p = p.reshape((p.shape[0], p.shape[1], p.shape[2], p.shape[3] * p.shape[4]))
