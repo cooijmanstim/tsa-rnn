@@ -1,4 +1,5 @@
 import operator
+import collections
 import logging
 
 logger = logging.getLogger(__name__)
@@ -8,10 +9,10 @@ import numpy as np
 import theano
 import theano.tensor as T
 
-from blocks.bricks.base import application, Brick, lazy
 from blocks.roles import add_role, WEIGHT, BIAS
-from blocks.bricks.parallel import Fork, Merge, Parallel
-from blocks.bricks.recurrent import BaseRecurrent, recurrent, LSTM
+from blocks.bricks.base import application, Brick, lazy
+from blocks.bricks.parallel import Parallel
+from blocks.bricks.recurrent import BaseRecurrent
 from blocks.bricks import Linear, Rectifier, Initializable, MLP, FeedforwardSequence, Feedforward, Bias, Activation
 from blocks.initialization import Constant, IsotropicGaussian
 from blocks.utils import shared_floatx_nans
@@ -261,18 +262,27 @@ def construct_cnn(name, layer_specs, n_channels, input_shape, batch_normalize):
     cnn.initialize()
     return cnn
 
-def construct_mlp(name, hidden_dims, input_dim, initargs, batch_normalize):
+def construct_mlp(name, hidden_dims, input_dim, initargs, batch_normalize, activations=None):
     if not hidden_dims:
         return FeedforwardIdentity(dim=input_dim)
+
+    if not activations:
+        activations = [Rectifier() for dim in hidden_dims]
+    elif not isinstance(activations, collections.Iterable):
+        activations = [activations] * len(hidden_dims)
+    assert len(activations) == len(hidden_dims)
+
     dims = [input_dim] + hidden_dims
-    activations = [
+    wrapped_activations = [
         NormalizedActivation(
             shape=[hidden_dim],
             name="activation_%i" % i,
-            batch_normalize=batch_normalize)
-        for i, hidden_dim in enumerate(hidden_dims)]
+            batch_normalize=batch_normalize,
+            activation=activation)
+        for i, (hidden_dim, activation)
+        in enumerate(zip(hidden_dims, activations))]
     mlp = MLP(name=name,
-              activations=activations,
+              activations=wrapped_activations,
               dims=dims,
               **initargs)
     # biases are handled by our activation function

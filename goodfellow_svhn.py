@@ -14,6 +14,7 @@ from fuel.transformers import Mapping
 from fuel.datasets import H5PYDataset
 
 import tasks
+import masonry
 
 class SVHN(H5PYDataset):
     def __init__(self, **kwargs):
@@ -42,19 +43,23 @@ def fix_representation(data):
     return x, y
 
 class Emitter(Initializable):
-    def __init__(self, hidden_dim, n_classes, **kwargs):
+    def __init__(self, hidden_dim, n_classes, batch_normalize, **kwargs):
         super(Emitter, self).__init__(**kwargs)
 
         self.hidden_dim = hidden_dim
         self.n_classes = n_classes
 
         # TODO: use TensorLinear or some such
-        self.emitters = [MLP(activations=[Rectifier(), Identity()],
-                             dims=[hidden_dim, hidden_dim/2, n],
-                             name="mlp_%i" % i,
-                             weights_init=Orthogonal(),
-                             biases_init=Constant(0))
-                         for i, n in enumerate(self.n_classes)]
+        self.emitters = [
+            masonry.construct_mlp(
+                activations=[None, Identity()],
+                input_dim=hidden_dim,
+                hidden_dims=[hidden_dim/2, n],
+                name="mlp_%i" % i,
+                batch_normalize=batch_normalize,
+                initargs=dict(weights_init=Orthogonal(),
+                              biases_init=Constant(0)))
+            for i, n in enumerate(self.n_classes)]
         self.softmax = Softmax()
 
         self.children = self.emitters + [self.softmax]
@@ -112,8 +117,9 @@ class NumberTask(tasks.Classification):
         return Mapping(super(NumberTask, self).get_stream(*args, **kwargs),
                        mapping=fix_representation)
 
-    def get_emitter(self, hidden_dim, **kwargs):
-        return Emitter(hidden_dim, self.n_classes)
+    def get_emitter(self, hidden_dim, batch_normalize, **kwargs):
+        return Emitter(hidden_dim, self.n_classes,
+                       batch_normalize=batch_normalize)
 
     def monitor_channels(self, graph):
         return [VariableFilter(name=name)(graph.auxiliary_variables)[0]

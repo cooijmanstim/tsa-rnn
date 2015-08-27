@@ -19,7 +19,7 @@ from blocks.extensions.saveload import Checkpoint
 from blocks.main_loop import MainLoop
 from blocks.extensions import FinishAfter, Printing, ProgressBar, Timing
 from blocks.bricks import Tanh, FeedforwardSequence
-from blocks.bricks.recurrent import LSTM
+from blocks import bricks
 from blocks.roles import OUTPUT
 from blocks.graph import ComputationGraph
 from blocks.filter import VariableFilter
@@ -141,12 +141,15 @@ def construct_model(task, patch_shape, initargs, n_channels, n_spatial_dims, hid
         initargs=initargs)
 
     # LSTM requires the input to have dim=4*hidden_dim
+    response_mlp_activations = [None for dim in response_mlp_spec[1:]]
     response_mlp_spec.append(4*hidden_dim)
+    response_mlp_activations.append(bricks.Identity())
     response_transform = masonry.construct_mlp(
         name="response_mlp",
         hidden_dims=response_mlp_spec[1:],
         input_dim=response_mlp_spec[0],
         batch_normalize=batch_normalize,
+        activations=response_mlp_activations,
         initargs=initargs)
 
     emitter = task.get_emitter(**hyperparameters)

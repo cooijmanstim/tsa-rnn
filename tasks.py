@@ -55,8 +55,9 @@ class Classification(object):
 
         return x, y
 
-    def get_emitter(self, hidden_dim, **kwargs):
-        return emitters.SingleSoftmax(hidden_dim, self.n_classes)
+    def get_emitter(self, hidden_dim, batch_normalize, **kwargs):
+        return emitters.SingleSoftmax(hidden_dim, self.n_classes,
+                                      batch_normalize=batch_normalize)
 
     def monitor_channels(self, graph):
         return [VariableFilter(name=name)(graph.auxiliary_variables)[0]
