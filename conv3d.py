@@ -164,15 +164,18 @@ class MaxPooling(Initializable, Feedforward):
         """
         if self.pooling_size == (1, 1, 1):
             return input_
-
         # Pooling on last two dimensions
-        input_ = input_.reshape((input_.shape[0], input_.shape[1] * input_.shape[2], input_.shape[3], input_.shape[4]))
+        input__shape = input_.shape
+        input_ = input_.reshape((input__shape[0], input__shape[1] * input__shape[2], input__shape[3], input__shape[4]))
         p = dnn_pool(img=input_, ws=tuple(self.pooling_size[1:]), stride=tuple(self.step[1:]))
-        p = p.reshape((p.shape[0], input_.shape[1], input_.shape[2], p.shape[2], p.shape[3]))
+        p_shape = p.shape
+        p = p.reshape((p_shape[0], input__shape[1], input__shape[2], p_shape[2], p_shape[3]))
         # Pooling on first dimension
-        p = p.reshape((p.shape[0], p.shape[1], p.shape[2], p.shape[3] * p.shape[4]))
+        p_shape = p.shape
+        p = p.reshape((p_shape[0], p_shape[1], p_shape[2], p_shape[3] * p_shape[4]))
         output = dnn_pool(img=p, ws=(self.pooling_size[0], 1), stride=(self.step[0], 1))
-        output = output.reshape((output.shape[0], output.shape[1], output.shape[2], p.shape[3], p.shape[4]))
+        output_shape = output.shape
+        output = output.reshape((output_shape[0], output_shape[1], output_shape[2], p_shape[3] , p_shape[4]))
         return output
 
     def get_dim(self, name):
