@@ -8,7 +8,7 @@ import theano.tensor as T
 from blocks.filter import VariableFilter
 
 from fuel.streams import DataStream
-from fuel.schemes import ShuffledScheme
+from fuel.schemes import ShuffledScheme, SequentialScheme
 
 import emitters
 
@@ -23,12 +23,15 @@ class Classification(object):
     def load_datasets(self):
         raise NotImplementedError()
 
-    def get_stream(self, which_set, scheme=None):
-        if not scheme:
-            scheme = ShuffledScheme(
-                self.datasets[which_set].num_examples
-                / self.shrink_dataset_by,
-                self.batch_size)
+    def get_stream_num_examples(self, which_set, monitor):
+        return (self.datasets[which_set].num_examples
+                / self.shrink_dataset_by)
+
+    def get_stream(self, which_set, shuffle=True, monitor=False, num_examples=None):
+        scheme_klass = ShuffledScheme if shuffle else SequentialScheme
+        if num_examples is None:
+            num_examples = self.get_stream_num_examples(which_set, monitor=monitor)
+        scheme = scheme_klass(num_examples, self.batch_size)
         return DataStream.default_stream(
             dataset=self.datasets[which_set],
             iteration_scheme=scheme)

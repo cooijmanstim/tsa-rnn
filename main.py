@@ -209,7 +209,7 @@ def construct_monitors(algorithm, task, n_patches, x, x_uncentered, hs,
     extensions.append(DataStreamMonitoring(data_independent_channels.get_channels(),
                                            data_stream=None, after_epoch=True))
     extensions.extend(DataStreamMonitoring((channels.get_channels() + [cost]),
-                                           data_stream=task.get_stream(which),
+                                           data_stream=task.get_stream(which, monitor=True),
                                            prefix=which, after_epoch=True)
                       for which in "train valid test".split())
 
@@ -229,7 +229,7 @@ def construct_monitors(algorithm, task, n_patches, x, x_uncentered, hs,
         for which in "train valid".split():
             patchmonitor = patchmonitor_klass(
                 save_to="patches_%s" % which,
-                data_stream=task.get_stream(which, SequentialScheme(5, 5)),
+                data_stream=task.get_stream(which, shuffle=False, num_examples=5),
                 every_n_batches=patchmonitor_interval,
                 extractor=patch_extractor,
                 map_to_input_space=masonry.static_map_to_input_space)

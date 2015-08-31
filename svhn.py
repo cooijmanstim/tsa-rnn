@@ -22,6 +22,11 @@ class DigitTask(tasks.Classification):
             valid=SVHN(which_sets=["train"], which_format=2, subset=slice(50000, None)),
             test=SVHN(which_sets=["test"], which_format=2))
 
+    def get_stream_num_examples(self, which_set, monitor):
+        if monitor and which_set == "train":
+            return 10000
+        return super(DigitTask, self).get_stream_num_examples(which_set, monitor)
+
     def get_stream(self, *args, **kwargs):
         return Mapping(super(DigitTask, self).get_stream(*args, **kwargs),
                        mapping=fix_target_representation)
