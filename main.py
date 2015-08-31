@@ -224,14 +224,17 @@ def construct_monitors(algorithm, task, n_patches, x, x_uncentered, hs,
         patch = T.stack(*[ram.attention.crop(x_uncentered, location[:, i, :], scale[:, i, :])
                           for i in xrange(n_patches)])
         patch = patch.dimshuffle(1, 0, *range(2, patch.ndim))
+        patch_extractor = theano.function([x_uncentered], [location, scale, patch])
 
-        patchmonitor = patchmonitor_klass(
-            task.get_stream("valid", SequentialScheme(5, 5)),
-            every_n_batches=patchmonitor_interval,
-            extractor=theano.function([x_uncentered], [location, scale, patch]),
-            map_to_input_space=masonry.static_map_to_input_space)
-        patchmonitor.save_patches("test.png")
-        extensions.append(patchmonitor)
+        for which in "train valid".split():
+            patchmonitor = patchmonitor_klass(
+                save_to="patches_%s" % which,
+                data_stream=task.get_stream(which, SequentialScheme(5, 5)),
+                every_n_batches=patchmonitor_interval,
+                extractor=patch_extractor,
+                map_to_input_space=masonry.static_map_to_input_space)
+            patchmonitor.save_patches("patchmonitor_test.png")
+            extensions.append(patchmonitor)
 
     plot_channels = []
     plot_channels.extend(task.plot_channels())
