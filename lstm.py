@@ -64,19 +64,19 @@ class LSTM(BaseRecurrent, Initializable):
             shape=(self.dim,),
             broadcastable=(False,),
             activation=Logistic(),
-            batch_normalize=True,
+            batch_normalize=False,
             name="in_activation")
         self.forget_activation = masonry.NormalizedActivation(
             shape=(self.dim,),
             broadcastable=(False,),
             activation=Logistic(),
-            batch_normalize=True,
+            batch_normalize=False,
             name="forget_activation")
         self.out_activation = masonry.NormalizedActivation(
             shape=(self.dim,),
             broadcastable=(False,),
             activation=Logistic(),
-            batch_normalize=True,
+            batch_normalize=False,
             name="out_activation")
         self.recurrent_activation = activation
 

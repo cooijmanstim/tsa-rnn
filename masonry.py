@@ -176,10 +176,22 @@ class RecurrentAttentionModel(BaseRecurrent):
 
         self.rnn = rnn
 
+        self.h2h_transforms = dict(
+            (state, construct_mlp(
+                name="h2h_%s" % state,
+                activations=[None],
+                input_dim=self.get_dim(state),
+                hidden_dims=[self.get_dim(state)],
+                batch_normalize=batch_normalize,
+                initargs=dict(weights_init=initialization.Identity(),
+                              biases_init=Constant(0))))
+            for state in "states states#1".split())
+        self.identity = bricks.Identity()
+
         # name of the RNN state that determines the parameters of the next glimpse
         self.attention_state_name = attention_state_name
 
-        self.children = ([self.rnn, self.attention, self.emitter]
+        self.children = ([self.rnn, self.attention, self.emitter, self.identity]
                          + list(self.h2h_transforms.values()))
 
         # states aren't known until now
@@ -195,6 +207,8 @@ class RecurrentAttentionModel(BaseRecurrent):
     @application
     def apply(self, x, **states):
         u = self.attention.apply(x, states[self.attention_state_name])
+        states = OrderedDict((key, self.h2h_transforms.get(key, self.identity).apply(value))
+                             for key, value in states.items())
         states = self.rnn.apply(inputs=u, iterate=False, as_dict=True, **states)
         return tuple(states.values())
 
