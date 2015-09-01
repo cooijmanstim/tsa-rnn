@@ -33,10 +33,13 @@ class SingleSoftmax(bricks.Initializable):
     def cost(self, cs, y, n_patches):
         energies = [self.mlp.apply(cs[:, t, :])
                     for t in xrange(n_patches)]
-        cross_entropies = [self.softmax.categorical_cross_entropy(y.flatten(), energy)
-                           for energy in energies]
-        error_rates = [T.neq(y, energy.argmax(axis=1)).mean(axis=0)
-                       for energy in energies]
+        cross_entropies = [
+            self.softmax.categorical_cross_entropy(
+                y.flatten(), energy).mean(axis=0)
+            for energy in energies]
+        error_rates = [
+            T.neq(y, energy.argmax(axis=1)).mean(axis=0)
+            for energy in energies]
         # train on final prediction
         cost = util.named(cross_entropies[-1], "cost")
         # monitor final prediction
