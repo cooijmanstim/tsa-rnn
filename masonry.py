@@ -1,5 +1,6 @@
 import operator
 import collections
+from collections import OrderedDict
 import logging
 
 logger = logging.getLogger(__name__)
@@ -13,8 +14,10 @@ from blocks.roles import add_role, WEIGHT, BIAS
 from blocks.bricks.base import application, Brick, lazy
 from blocks.bricks.parallel import Parallel
 from blocks.bricks.recurrent import BaseRecurrent
+from recurrentstack import RecurrentStack
 from blocks.bricks import Linear, Rectifier, Initializable, MLP, FeedforwardSequence, Feedforward, Bias, Activation
-from blocks.initialization import Constant, IsotropicGaussian
+from blocks import initialization, bricks
+from blocks.initialization import Constant, IsotropicGaussian, Orthogonal
 from blocks.utils import shared_floatx_nans
 from blocks.bricks.conv import Flattener
 
@@ -165,34 +168,43 @@ class SpatialAttention(Brick):
         return u
 
 class RecurrentAttentionModel(BaseRecurrent):
-    def __init__(self, rnn, attention, emitter, **kwargs):
+    def __init__(self, rnn, attention, emitter, batch_normalize, attention_state_name, **kwargs):
         super(RecurrentAttentionModel, self).__init__(**kwargs)
 
-        self.rnn = rnn
         self.attention = attention
         self.emitter = emitter
 
-        self.children = [self.rnn, self.attention, self.emitter]
+        self.rnn = rnn
+
+        # name of the RNN state that determines the parameters of the next glimpse
+        self.attention_state_name = attention_state_name
+
+        self.children = ([self.rnn, self.attention, self.emitter]
+                         + list(self.h2h_transforms.values()))
+
+        # states aren't known until now
+        self.apply.outputs = self.rnn.apply.outputs
+        self.compute_initial_state.outputs = self.rnn.apply.outputs
 
     def get_dim(self, name):
         try:
-            return dict(h=self.rnn.get_dim("states"),
-                        c=self.rnn.get_dim("cells"))[name]
-        except KeyError:
+            return self.rnn.get_dim(name)
+        except:
             return super(RecurrentAttentionModel, self).get_dim(name)
 
-    @application(inputs="x h c".split(), outputs="h c".split())
-    def apply(self, x, h, c):
-        u = self.attention.apply(x, h)
-        h, c = self.rnn.apply(inputs=u, iterate=False, states=h, cells=c)
-        return h, c
+    @application
+    def apply(self, x, **states):
+        u = self.attention.apply(x, states[self.attention_state_name])
+        states = self.rnn.apply(inputs=u, iterate=False, as_dict=True, **states)
+        return tuple(states.values())
 
-    @application(inputs=['x'], outputs="h c".split())
+    @application
     def compute_initial_state(self, x):
+        initial_states = self.rnn.initial_states(x.shape[0], as_dict=True)
+        # condition on initial shrink-to-fit patch
         u = self.attention.compute_initial_input(x)
-        h, c = self.rnn.initial_states(x.shape[0])
-        h, c = self.rnn.apply(inputs=u, iterate=False, states=h, cells=c)
-        return h, c
+        conditioned_states = self.rnn.apply(as_dict=True, inputs=u, iterate=False, **initial_states)
+        return tuple(conditioned_states.values())
 
 def construct_cnn_layer(name, layer_spec, conv_module, ndim, batch_normalize):
     type_ = layer_spec.pop("type", "conv")
@@ -314,7 +326,7 @@ class NormalizedActivation(Initializable, Feedforward):
         if self.batch_normalize:
             sequence.append(Standardization(**arghs))
             sequence.append(SharedScale(
-                weights_init=Constant(1),
+                weights_init=initialization.Constant(1),
                 **arghs))
         sequence.append(SharedShift(
             biases_init=Constant(0),
@@ -450,8 +462,8 @@ class Standardization(Initializable, Feedforward):
             for stat in self.stats)
 
     def _initialize(self):
-        for stat, initialization in (("mean", 0), ("var",  1)):
-            self.population_stats[stat].get_value().fill(initialization)
+        for stat, initializer in (("mean", 0), ("var",  1)):
+            self.population_stats[stat].get_value().fill(initializer)
 
     @application(inputs=["input_"], outputs=["output"])
     def apply(self, input_):

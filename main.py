@@ -19,6 +19,7 @@ from blocks.extensions.saveload import Checkpoint
 from blocks.main_loop import MainLoop
 from blocks.extensions import FinishAfter, Printing, ProgressBar, Timing
 from blocks.bricks import Tanh, FeedforwardSequence
+from recurrentstack import RecurrentStack
 from blocks import bricks
 from blocks.roles import OUTPUT
 from blocks.graph import ComputationGraph
@@ -47,11 +48,10 @@ class Ram(object):
                  response_transform, location_std, scale_std, cutoff,
                  batched_window, initargs, emitter, **kwargs):
         LSTM = lstm.get_implementation(batch_normalize)
-        self.rnn = LSTM(activation=Tanh(),
-                        dim=hidden_dim,
-                        name="recurrent",
-                        weights_init=IsotropicGaussian(1e-4),
-                        biases_init=Constant(0))
+        self.rnn = RecurrentStack([LSTM(activation=Tanh(), dim=hidden_dim),
+                                   LSTM(activation=Tanh(), dim=hidden_dim)],
+                                  weights_init=IsotropicGaussian(1e-4),
+                                  biases_init=Constant(0))
         self.locator = masonry.Locator(hidden_dim, n_spatial_dims,
                                        area_transform=prefork_area_transform,
                                        location_std=location_std,
@@ -76,11 +76,15 @@ class Ram(object):
         self.emitter = emitter
         self.model = masonry.RecurrentAttentionModel(
             self.rnn, self.attention, self.emitter,
+            # attend based on upper RNN states
+            attention_state_name="states#1",
+            batch_normalize=batch_normalize,
             name="ram")
 
     def initialize(self):
         self.model.initialize()
-        Identity().initialize(self.rnn.W_state, self.rnn.rng)
+        for rnn in self.rnn.transitions:
+            Identity().initialize(rnn.W_state, rnn.rng)
 
     def compute(self, x, n_patches):
         states = []
@@ -88,7 +92,7 @@ class Ram(object):
         n_steps = n_patches - 1
         for i in xrange(n_steps):
             states.append(self.model.apply(x=x, as_dict=True, **states[-1]))
-        outputs = T.concatenate([state["h"][:, np.newaxis, :]
+        outputs = T.concatenate([state["states"][:, np.newaxis, :]
                                  for state in states],
                                 axis=1)
         return outputs
