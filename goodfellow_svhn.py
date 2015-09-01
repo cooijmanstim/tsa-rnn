@@ -1,3 +1,4 @@
+# SVHN number transcription as in http://arxiv.org/pdf/1312.6082v4.pdf
 import numpy as np
 
 import theano
@@ -83,21 +84,39 @@ class Emitter(bricks.Initializable):
         lengths = y[:, -1]
         length_masks = _length_masks[lengths]
 
+        def compute_yhat(logprobs):
+            digits_logprobs = T.stack(*logprobs[:-1]) # (#positions, batch, #classes)
+            length_logprobs = logprobs[-1]           # (batch, #classes)
+            # predict digits independently
+            digits_hat = digits_logprobs.argmax(axis=2) # (#positions, batch)
+            # likelihood of prediction
+            digits_logprob = digits_logprobs.max(axis=2)
+            # logprobs of resulting number given length
+            number_logprobs = T.extra_ops.cumsum(digits_logprob, axis=0) # (#positions, batch)
+            # choose length to minimize length_logprob + number_logprob
+            length_hat = (length_logprobs.T + number_logprobs).argmax(axis=0, keepdims=True) # (1, batch)
+            yhat = T.concatenate([digits_hat, length_hat], axis=0).T
+            return yhat # shape (batch, #positions + 1)
+
+        def compute_mean_cross_entropy(y, logprobs):
+            return sum(self.softmax.categorical_cross_entropy(y[:, i], logprob)
+                       # to avoid punishing predictions of nonexistent digits:
+                       * (length_masks[:, i] if i < max_length else 1)
+                       for i, logprob in enumerate(logprobs)).mean()
+        def compute_error_rate(y, logprobs):
+            yhat = compute_yhat(logprobs)
+            return T.stack(*[T.neq(y[:, i], yhat[:, i])
+                             # to avoid punishing predictions of nonexistent digits:
+                             * (length_masks[:, i] if i < max_length else 1)
+                             for i, logprob in enumerate(logprobs)]).any(axis=0).mean()
+
         mean_cross_entropies = []
         error_rates = []
         for t in xrange(n_patches):
-            energies = [emitter.apply(cs[:, t, :]) for emitter in self.emitters]
-            mean_cross_entropies.append(
-                sum(self.softmax.categorical_cross_entropy(y[:, i], energy)
-                    # to avoid punishing predictions of nonexistent digits:
-                    * (length_masks[:, i] if i < max_length else 1)
-                    for i, energy in enumerate(energies)).mean())
-            # FIXME: do proper logprob-minimizing prediction of length
-            error_rates.append(
-                T.stack(*[T.neq(y[:, i], energy.argmax(axis=1))
-                          # to avoid punishing predictions of nonexistent digits:
-                          * (length_masks[:, i] if i < max_length else 1)
-                          for i, energy in enumerate(energies)]).any(axis=0).mean())
+            logprobs = [self.softmax.log_probabilities(emitter.apply(cs[:, t, :]))
+                        for emitter in self.emitters]
+            mean_cross_entropies.append(compute_mean_cross_entropy(y, logprobs))
+            error_rates.append(compute_error_rate(y, logprobs))
 
         self.add_auxiliary_variable(mean_cross_entropies[-1], name="cross_entropy")
         self.add_auxiliary_variable(error_rates[-1], name="error_rate")
