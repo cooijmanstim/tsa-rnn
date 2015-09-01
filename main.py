@@ -14,7 +14,6 @@ from blocks.extensions.monitoring import TrainingDataMonitoring, DataStreamMonit
 from blocks.extensions.saveload import Checkpoint
 from blocks.main_loop import MainLoop
 from blocks.extensions import FinishAfter, Printing, ProgressBar, Timing
-from recurrentstack import RecurrentStack
 from blocks.roles import OUTPUT
 from blocks.graph import ComputationGraph
 from blocks.filter import VariableFilter
@@ -46,7 +45,7 @@ class Ram(object):
                  response_transform, location_std, scale_std, cutoff,
                  batched_window, initargs, emitter, **kwargs):
         LSTM = lstm.get_implementation(batch_normalize)
-        self.rnn = RecurrentStack(
+        self.rnn = bricks.RecurrentStack(
             [LSTM(activation=bricks.Tanh(), dim=hidden_dim),
              LSTM(activation=bricks.Tanh(), dim=hidden_dim)],
             weights_init=initialization.IsotropicGaussian(1e-4),
