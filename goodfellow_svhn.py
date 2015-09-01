@@ -28,7 +28,16 @@ def fix_representation(data):
 
     x /= 255.0
     x = x.mean(axis=3, keepdims=True) # grayscale
+    # move channel axis forward
     x = np.rollaxis(x, 3, 1)
+
+    # crop images randomly
+    assert(x.shape[2] == x.shape[3])
+    image_size = x.shape[2]
+    crop_size = 54
+    a = np.random.randint(0, image_size - crop_size, size=(2,))
+    b = a + crop_size
+    x = x[:, :, a[0]:b[0], a[1]:b[1]]
 
     y = np.array(y, copy=True)
     # use zero to represent zero
