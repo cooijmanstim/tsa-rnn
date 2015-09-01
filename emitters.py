@@ -1,13 +1,14 @@
 import theano.tensor as T
 
-from blocks.bricks import Initializable, MLP, Softmax, Rectifier, Identity
 from blocks.bricks.base import application
-from blocks.initialization import Orthogonal, Constant
+
+import bricks
+import initialization
 
 import util
 import masonry
 
-class SingleSoftmax(Initializable):
+class SingleSoftmax(bricks.Initializable):
     def __init__(self, hidden_dim, n_classes, batch_normalize, **kwargs):
         super(SingleSoftmax, self).__init__(**kwargs)
 
@@ -16,13 +17,13 @@ class SingleSoftmax(Initializable):
 
         self.mlp = masonry.construct_mlp(
             name="mlp",
-            activations=[None, Identity()],
+            activations=[None, bricks.Identity()],
             input_dim=hidden_dim,
             hidden_dims=[hidden_dim/2, self.n_classes],
             batch_normalize=batch_normalize,
-            initargs=dict(weights_init=Orthogonal(),
-                          biases_init=Constant(0)))
-        self.softmax = Softmax()
+            initargs=dict(weights_init=initialization.Orthogonal(),
+                          biases_init=initialization.Constant(0)))
+        self.softmax = bricks.Softmax()
 
         self.children = [self.mlp, self.softmax]
 

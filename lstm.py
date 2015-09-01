@@ -13,7 +13,7 @@ import blocks.bricks.recurrent
 def get_implementation(batch_normalize):
     return LSTM if batch_normalize else blocks.bricks.recurrent.LSTM
 
-import masonry
+import bricks
 
 class LSTM(BaseRecurrent, Initializable):
     u"""Long Short Term Memory.
@@ -60,19 +60,19 @@ class LSTM(BaseRecurrent, Initializable):
         if not activation:
             activation = Tanh()
 
-        self.in_activation = masonry.NormalizedActivation(
+        self.in_activation = bricks.NormalizedActivation(
             shape=(self.dim,),
             broadcastable=(False,),
             activation=Logistic(),
             batch_normalize=False,
             name="in_activation")
-        self.forget_activation = masonry.NormalizedActivation(
+        self.forget_activation = bricks.NormalizedActivation(
             shape=(self.dim,),
             broadcastable=(False,),
             activation=Logistic(),
             batch_normalize=False,
             name="forget_activation")
-        self.out_activation = masonry.NormalizedActivation(
+        self.out_activation = bricks.NormalizedActivation(
             shape=(self.dim,),
             broadcastable=(False,),
             activation=Logistic(),

@@ -8,25 +8,23 @@ import theano
 import theano.tensor as T
 import theano.sandbox.rng_mrg
 
-from fuel.schemes import SequentialScheme
-
-from blocks.initialization import IsotropicGaussian, Constant, Orthogonal, Identity
-from blocks.theano_expressions import l2_norm
 from blocks.model import Model
 from blocks.algorithms import GradientDescent, RMSProp, Adam
 from blocks.extensions.monitoring import TrainingDataMonitoring, DataStreamMonitoring
 from blocks.extensions.saveload import Checkpoint
 from blocks.main_loop import MainLoop
 from blocks.extensions import FinishAfter, Printing, ProgressBar, Timing
-from blocks.bricks import Tanh, FeedforwardSequence
 from recurrentstack import RecurrentStack
-from blocks import bricks
 from blocks.roles import OUTPUT
 from blocks.graph import ComputationGraph
 from blocks.filter import VariableFilter
 from blocks.extras.extensions.plot import Plot
 
+import bricks
+import initialization
+
 import masonry
+import attention
 import crop
 import util
 from patchmonitor import PatchMonitoring, VideoPatchMonitoring
@@ -48,21 +46,23 @@ class Ram(object):
                  response_transform, location_std, scale_std, cutoff,
                  batched_window, initargs, emitter, **kwargs):
         LSTM = lstm.get_implementation(batch_normalize)
-        self.rnn = RecurrentStack([LSTM(activation=Tanh(), dim=hidden_dim),
-                                   LSTM(activation=Tanh(), dim=hidden_dim)],
-                                  weights_init=IsotropicGaussian(1e-4),
-                                  biases_init=Constant(0))
-        self.locator = masonry.Locator(hidden_dim, n_spatial_dims,
-                                       area_transform=prefork_area_transform,
-                                       location_std=location_std,
-                                       scale_std=scale_std,
-                                       **initargs)
+        self.rnn = RecurrentStack(
+            [LSTM(activation=bricks.Tanh(), dim=hidden_dim),
+             LSTM(activation=bricks.Tanh(), dim=hidden_dim)],
+            weights_init=initialization.IsotropicGaussian(1e-4),
+            biases_init=initialization.Constant(0))
+        self.locator = attention.Locator(
+            hidden_dim, n_spatial_dims,
+            area_transform=prefork_area_transform,
+            location_std=location_std,
+            scale_std=scale_std,
+            **initargs)
         self.cropper = crop.LocallySoftRectangularCropper(
             n_spatial_dims=n_spatial_dims,
             image_shape=image_shape, patch_shape=patch_shape,
             kernel=crop.Gaussian(), cutoff=cutoff,
             batched_window=batched_window)
-        self.merger = masonry.Merger(
+        self.merger = attention.Merger(
             patch_transform=patch_transform,
             area_transform=postmerge_area_transform,
             response_transform=response_transform,
@@ -70,11 +70,11 @@ class Ram(object):
             whatwhere_interaction=whatwhere_interaction,
             batch_normalize=batch_normalize,
             **initargs)
-        self.attention = masonry.SpatialAttention(
+        self.attention = attention.SpatialAttention(
             self.locator, self.cropper, self.merger,
             name="sa")
         self.emitter = emitter
-        self.model = masonry.RecurrentAttentionModel(
+        self.model = attention.RecurrentAttentionModel(
             self.rnn, self.attention, self.emitter,
             # attend based on upper RNN states
             attention_state_name="states#1",
@@ -84,7 +84,7 @@ class Ram(object):
     def initialize(self):
         self.model.initialize()
         for rnn in self.rnn.transitions:
-            Identity().initialize(rnn.W_state, rnn.rng)
+            initialization.Identity().initialize(rnn.W_state, rnn.rng)
 
     def compute(self, x, n_patches):
         states = []
@@ -120,7 +120,7 @@ def construct_model(task, patch_shape, initargs, n_channels, n_spatial_dims, hid
         shape = patch_transforms[-1].brick.get_dim("output")
     else:
         shape = (n_channels,) + tuple(patch_shape)
-    patch_transforms.append(masonry.FeedforwardFlattener(input_shape=shape).apply)
+    patch_transforms.append(bricks.FeedforwardFlattener(input_shape=shape).apply)
     if patch_mlp_spec:
         patch_transforms.append(masonry.construct_mlp(
             name="patch_mlp",
@@ -128,7 +128,7 @@ def construct_model(task, patch_shape, initargs, n_channels, n_spatial_dims, hid
             input_dim=patch_transforms[-1].brick.output_dim,
             batch_normalize=batch_normalize,
             initargs=initargs).apply)
-    patch_transform = FeedforwardSequence(patch_transforms, name="ffs")
+    patch_transform = bricks.FeedforwardSequence(patch_transforms, name="ffs")
 
     prefork_area_transform = masonry.construct_mlp(
         name="prefork_area_mlp",
@@ -236,7 +236,7 @@ def construct_monitors(algorithm, task, n_patches, x, x_uncentered, hs,
                 data_stream=task.get_stream(which, shuffle=False, num_examples=5),
                 every_n_batches=patchmonitor_interval,
                 extractor=patch_extractor,
-                map_to_input_space=masonry.static_map_to_input_space)
+                map_to_input_space=attention.static_map_to_input_space)
             patchmonitor.save_patches("patchmonitor_test.png")
             extensions.append(patchmonitor)
 
@@ -316,8 +316,8 @@ if __name__ == "__main__":
             hyperparameters.update(yaml.load(f))
 
     hyperparameters["n_spatial_dims"] = len(hyperparameters["patch_shape"])
-    hyperparameters["initargs"] = dict(weights_init=Orthogonal(),
-                                       biases_init=Constant(0))
+    hyperparameters["initargs"] = dict(weights_init=initialization.Orthogonal(),
+                                       biases_init=initialization.Constant(0))
     hyperparameters["hyperparameters"] = hyperparameters
 
     main_loop = construct_main_loop(**hyperparameters)

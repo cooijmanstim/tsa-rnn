@@ -1,17 +1,16 @@
-import os
-
 import numpy as np
 
 import theano
 import theano.tensor as T
 
-from blocks.initialization import Orthogonal, Constant
-from blocks.bricks import MLP, Softmax, Initializable, Rectifier, Identity
 from blocks.bricks.base import application
 from blocks.filter import VariableFilter
 
 from fuel.transformers import Mapping
 from fuel.datasets import H5PYDataset
+
+import bricks
+import initialization
 
 import tasks
 import masonry
@@ -51,7 +50,7 @@ def fix_representation(data):
     y = y.astype(np.uint8)
     return x, y
 
-class Emitter(Initializable):
+class Emitter(bricks.Initializable):
     def __init__(self, hidden_dim, n_classes, batch_normalize, **kwargs):
         super(Emitter, self).__init__(**kwargs)
 
@@ -61,15 +60,15 @@ class Emitter(Initializable):
         # TODO: use TensorLinear or some such
         self.emitters = [
             masonry.construct_mlp(
-                activations=[None, Identity()],
+                activations=[None, bricks.Identity()],
                 input_dim=hidden_dim,
                 hidden_dims=[hidden_dim/2, n],
                 name="mlp_%i" % i,
                 batch_normalize=batch_normalize,
-                initargs=dict(weights_init=Orthogonal(),
-                              biases_init=Constant(0)))
+                initargs=dict(weights_init=initialization.Orthogonal(),
+                              biases_init=initialization.Constant(0)))
             for i, n in enumerate(self.n_classes)]
-        self.softmax = Softmax()
+        self.softmax = bricks.Softmax()
 
         self.children = self.emitters + [self.softmax]
 
