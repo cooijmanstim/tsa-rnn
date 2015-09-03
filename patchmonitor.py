@@ -3,6 +3,7 @@ import matplotlib
 matplotlib.use('Agg')
 
 import os
+import math
 
 import numpy as np
 
@@ -113,6 +114,8 @@ class VideoPatchMonitoring(SimpleExtension):
         videos = batch['features']
         locationss, scaless, patchess = self.extractor(videos)
 
+        video_shape = videos.shape[-3:]
+        patch_shape = patchess.shape[-3:]
         n_patches = patchess.shape[1]
 
         if videos.shape[1] == 1:
@@ -134,7 +137,6 @@ class VideoPatchMonitoring(SimpleExtension):
             self.imshow(video_image, axes=video_ax)
             video_ax.axis("off")
 
-            # TODO: maybe rectangles in video_ax
             patch_ax = plt.subplot(outer_grid[1, 0])
             patch_image = (patches
                            .transpose(0, 2, 1, 3)
@@ -142,6 +144,28 @@ class VideoPatchMonitoring(SimpleExtension):
                                      patches.shape[1]*patches.shape[3])))
             self.imshow(patch_image, axes=patch_ax)
             patch_ax.axis("off")
+
+            # draw rectangles in video_ax to show patch support
+            true_locations, true_scales = self.map_to_input_space(
+                locations, scales,
+                np.array(patch_shape, dtype='float32'),
+                np.array(video_shape, dtype='float32'))
+
+            for true_location, true_scale in zip(true_locations, true_scales):
+                # duration, height, width
+                patch_dhw = patch_shape / true_scale
+                # first-frame, top, left
+                patch_tyx = true_location - patch_dhw/2.0
+
+                # for each frame covered by the patch
+                for patch_t in range(int(math.floor(patch_tyx[0])),
+                                    int(math.ceil(patch_tyx[0] + patch_dhw[0]))):
+                    frame_x = patch_t * video_shape[2]
+                    video_ax.add_patch(matplotlib.patches.Rectangle(
+                        (frame_x + patch_tyx[2], patch_tyx[1]),
+                        patch_dhw[2], patch_dhw[1],
+                        edgecolor="red",
+                        facecolor="none"))
 
             fig = plt.gcf()
             fig.set_size_inches((20, 20))
