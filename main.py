@@ -17,7 +17,6 @@ from blocks.extensions import FinishAfter, Printing, ProgressBar, Timing
 from blocks.roles import OUTPUT
 from blocks.graph import ComputationGraph
 from blocks.filter import VariableFilter
-from blocks.extras.extensions.plot import Plot
 
 import bricks
 import initialization
@@ -262,6 +261,7 @@ def construct_monitors(algorithm, task, n_patches, x, x_uncentered, hs,
         plot_channels.append(["train_cost"])
         #plot_channels.append(["train_%s" % step_channel.name for step_channel in step_channels])
 
+        from blocks.extras.extensions.plot import Plot
         extensions.append(Plot(name, channels=plot_channels,
                             after_epoch=True, server_url=plot_url))
 
