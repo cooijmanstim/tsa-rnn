@@ -42,6 +42,7 @@ class Ram(object):
     def __init__(self, image_shape, patch_shape, hidden_dim,
                  n_spatial_dims, whatwhere_interaction, prefork_area_transform,
                  postmerge_area_transform, patch_transform, batch_normalize,
+                 insert_h2h_transforms,
                  response_transform, location_std, scale_std, cutoff,
                  batched_window, initargs, emitter, **kwargs):
         LSTM = lstm.get_implementation(batch_normalize)
@@ -50,6 +51,21 @@ class Ram(object):
              LSTM(activation=bricks.Tanh(), dim=hidden_dim)],
             weights_init=initialization.IsotropicGaussian(1e-4),
             biases_init=initialization.Constant(0))
+
+        if insert_h2h_transforms:
+            h2h_transforms = dict(
+                (state, masonry.construct_mlp(
+                    name="h2h_%s" % state,
+                    activations=[None],
+                    input_dim=self.rnn.get_dim(state),
+                    hidden_dims=[self.rnn.get_dim(state)],
+                    batch_normalize=batch_normalize,
+                    initargs=dict(weights_init=initialization.Identity(),
+                                biases_init=initialization.Constant(0))))
+                for state in "states states#1".split())
+        else:
+            h2h_transforms = []
+
         self.locator = attention.Locator(
             hidden_dim, n_spatial_dims,
             area_transform=prefork_area_transform,
@@ -77,6 +93,7 @@ class Ram(object):
             self.rnn, self.attention, self.emitter,
             # attend based on upper RNN states
             attention_state_name="states#1",
+            h2h_transforms=h2h_transforms,
             batch_normalize=batch_normalize,
             name="ram")
 
@@ -165,8 +182,8 @@ def construct_model(task, patch_shape, initargs, n_channels, n_spatial_dims, hid
                **hyperparameters)
 
 def construct_monitors(algorithm, task, n_patches, x, x_uncentered, hs, 
-                       graph, plot_url, name, ram, model, cost,
-                       n_spatial_dims, patchmonitor_interval=100, **kwargs):
+                       graph, name, ram, model, cost,
+                       n_spatial_dims, plot_url, patchmonitor_interval=100, **kwargs):
     location, scale, savings = util.get_recurrent_auxiliaries(
         "location scale savings".split(), graph, n_patches)
 
@@ -239,13 +256,14 @@ def construct_monitors(algorithm, task, n_patches, x, x_uncentered, hs,
             patchmonitor.save_patches("patchmonitor_test.png")
             extensions.append(patchmonitor)
 
-    plot_channels = []
-    plot_channels.extend(task.plot_channels())
-    plot_channels.append(["train_cost"])
-    #plot_channels.append(["train_%s" % step_channel.name for step_channel in step_channels])
+    if plot_url:
+        plot_channels = []
+        plot_channels.extend(task.plot_channels())
+        plot_channels.append(["train_cost"])
+        #plot_channels.append(["train_%s" % step_channel.name for step_channel in step_channels])
 
-    extensions.append(Plot(name, channels=plot_channels,
-                           after_epoch=True, server_url=plot_url))
+        extensions.append(Plot(name, channels=plot_channels,
+                            after_epoch=True, server_url=plot_url))
 
     return extensions
 

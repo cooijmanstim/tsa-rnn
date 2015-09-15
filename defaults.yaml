@@ -28,7 +28,8 @@ response_mlp_spec: []
 learning_rate: 0.0001
 batched_window: True
 cutoff: 3
-plot_url: http://bart2:5006/
 location_std: 0.1
 scale_std: 0.01
 batch_normalize: True
+plot_url: null
+insert_h2h_transforms: False

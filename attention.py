@@ -158,7 +158,7 @@ class SpatialAttention(Brick):
         return u
 
 class RecurrentAttentionModel(bricks.BaseRecurrent):
-    def __init__(self, rnn, attention, emitter, batch_normalize, attention_state_name, **kwargs):
+    def __init__(self, rnn, attention, emitter, batch_normalize, attention_state_name, h2h_transforms, **kwargs):
         super(RecurrentAttentionModel, self).__init__(**kwargs)
 
         self.attention = attention
@@ -166,16 +166,8 @@ class RecurrentAttentionModel(bricks.BaseRecurrent):
 
         self.rnn = rnn
 
-        self.h2h_transforms = dict(
-            (state, masonry.construct_mlp(
-                name="h2h_%s" % state,
-                activations=[None],
-                input_dim=self.get_dim(state),
-                hidden_dims=[self.get_dim(state)],
-                batch_normalize=batch_normalize,
-                initargs=dict(weights_init=initialization.Identity(),
-                              biases_init=initialization.Constant(0))))
-            for state in "states states#1".split())
+        # a dict mapping recurrentstack state names to applications
+        self.h2h_transforms = dict(h2h_transforms)
         self.identity = bricks.Identity()
 
         # name of the RNN state that determines the parameters of the next glimpse
