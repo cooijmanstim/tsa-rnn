@@ -1,3 +1,4 @@
+import os
 import logging
 
 import numpy as np
@@ -71,7 +72,13 @@ class Classification(object):
                 for name in "cross_entropy error_rate".split()]
 
     def preprocess(self, x):
-        cache = "/data/lisatmp3/cooijmat/preprocess-cache/%s.npz" % self.name
+        cache_dir = os.environ["PREPROCESS_CACHE"]
+        try:
+            os.mkdir(cache_dir)
+        except OSError:
+            # directory already exists. surely the end of the world.
+            pass
+        cache = os.path.join(cache_dir, "%s.npz" % self.name)
         try:
             data = np.load(cache)
             mean = data["mean"]
@@ -88,7 +95,7 @@ class Classification(object):
             print "mean taken"
             try:
                 np.savez(cache, mean=mean)
-            except IOError:
-                logger.error("couldn't save preprocessing cache")
+            except IOError, e:
+                logger.error("couldn't save preprocessing cache: %s" % e)
                 import ipdb; ipdb.set_trace()
         return x - mean
