@@ -1,4 +1,6 @@
 # SVHN number transcription as in http://arxiv.org/pdf/1312.6082v4.pdf
+import os
+
 import numpy as np
 
 import theano
@@ -20,7 +22,7 @@ class SVHN(H5PYDataset):
     def __init__(self, **kwargs):
         kwargs.setdefault('load_in_memory', True)
         super(SVHN, self).__init__(
-            "/data/lisatmp3/cooijmat/datasets/svhn/dataset_64_gray.h5",
+            os.path.join(os.environ["SVHN"], "dataset_64_gray.h5"),
             **kwargs)
 
 def fix_representation(data):
