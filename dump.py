@@ -25,7 +25,8 @@ class Dump(SimpleExtension):
         if not os.path.exists(self.save_path):
             os.mkdir(self.save_path)
         filename = "params_%i.npz" % self.main_loop.status["epochs_done"]
-        dump_model_parameters(filename, self.main_loop.model)
+        dump_model_parameters(os.path.join(self.save_path, filename),
+                              self.main_loop.model)
 
 class PrintingTo(Printing):
     def __init__(self, path, **kwargs):
