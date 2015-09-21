@@ -40,14 +40,25 @@ floatX = theano.config.floatX
 class Ram(object):
     def __init__(self, image_shape, patch_shape, hidden_dim,
                  n_spatial_dims, whatwhere_interaction, prefork_area_transform,
-                 postmerge_area_transform, patch_transform, batch_normalize,
+                 postmerge_area_transform, patch_transform,
+                 batch_normalize,
+                 batch_normalize_input_gate,
+                 batch_normalize_forget_gate,
+                 batch_normalize_output_gate,
                  insert_h2h_transforms,
                  response_transform, location_std, scale_std, cutoff,
                  batched_window, initargs, emitter, **kwargs):
-        LSTM = lstm.get_implementation(batch_normalize)
         self.rnn = bricks.RecurrentStack(
-            [LSTM(activation=bricks.Tanh(), dim=hidden_dim),
-             LSTM(activation=bricks.Tanh(), dim=hidden_dim)],
+            [lstm.instantiate(activation=bricks.Tanh(), dim=hidden_dim,
+                              batch_normalize=batch_normalize,
+                              batch_normalize_input_gate=batch_normalize_input_gate,
+                              batch_normalize_forget_gate=batch_normalize_forget_gate,
+                              batch_normalize_output_gate=batch_normalize_output_gate),
+             lstm.instantiate(activation=bricks.Tanh(), dim=hidden_dim,
+                              batch_normalize=batch_normalize,
+                              batch_normalize_input_gate=batch_normalize_input_gate,
+                              batch_normalize_forget_gate=batch_normalize_forget_gate,
+                              batch_normalize_output_gate=batch_normalize_output_gate)],
             weights_init=initialization.IsotropicGaussian(1e-4),
             biases_init=initialization.Constant(0))
 

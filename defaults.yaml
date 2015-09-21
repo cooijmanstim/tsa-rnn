@@ -31,5 +31,8 @@ cutoff: 3
 location_std: 0.1
 scale_std: 0.01
 batch_normalize: True
+batch_normalize_input_gate: False
+batch_normalize_forget_gate: False
+batch_normalize_output_gate: False
 plot_url: null
 insert_h2h_transforms: False

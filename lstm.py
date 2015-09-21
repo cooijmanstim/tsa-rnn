@@ -10,8 +10,15 @@ from blocks.utils import shared_floatx_nans, shared_floatx_zeros
 
 import blocks.bricks.recurrent
 
-def get_implementation(batch_normalize):
-    return LSTM if batch_normalize else blocks.bricks.recurrent.LSTM
+def instantiate(**kwargs):
+    batch_normalize = kwargs.pop("batch_normalize")
+    if batch_normalize:
+        return LSTM(**kwargs)
+    else:
+        kwargs.pop("batch_normalize_input_gate")
+        kwargs.pop("batch_normalize_forget_gate")
+        kwargs.pop("batch_normalize_output_gate")
+        return blocks.bricks.recurrent.LSTM(**kwargs)
 
 import bricks
 
@@ -53,7 +60,12 @@ class LSTM(BaseRecurrent, Initializable):
 
     """
     @lazy(allocation=['dim'])
-    def __init__(self, dim, activation=None, **kwargs):
+    def __init__(self, dim,
+                 batch_normalize_input_gate,
+                 batch_normalize_forget_gate,
+                 batch_normalize_output_gate,
+                 activation=None,
+                 **kwargs):
         super(LSTM, self).__init__(**kwargs)
         self.dim = dim
 
@@ -64,19 +76,19 @@ class LSTM(BaseRecurrent, Initializable):
             shape=(self.dim,),
             broadcastable=(False,),
             activation=Logistic(),
-            batch_normalize=False,
+            batch_normalize=batch_normalize_input_gate,
             name="in_activation")
         self.forget_activation = bricks.NormalizedActivation(
             shape=(self.dim,),
             broadcastable=(False,),
             activation=Logistic(),
-            batch_normalize=False,
+            batch_normalize=batch_normalize_forget_gate,
             name="forget_activation")
         self.out_activation = bricks.NormalizedActivation(
             shape=(self.dim,),
             broadcastable=(False,),
             activation=Logistic(),
-            batch_normalize=False,
+            batch_normalize=batch_normalize_output_gate,
             name="out_activation")
         self.recurrent_activation = activation
 
