@@ -95,12 +95,11 @@ class Ram(object):
             whatwhere_interaction=whatwhere_interaction,
             batch_normalize=batch_normalize,
             **initargs)
-        self.attention = attention.SpatialAttention(
-            self.locator, self.cropper, self.merger,
-            name="sa")
         self.emitter = emitter
         self.model = attention.RecurrentAttentionModel(
-            self.rnn, self.attention, self.emitter,
+            self.rnn,
+            self.locator, self.cropper, self.merger,
+            self.emitter,
             # attend based on upper RNN states
             attention_state_name="states#1",
             h2h_transforms=h2h_transforms,

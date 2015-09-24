@@ -97,7 +97,7 @@ class Locator(Initializable):
         scale += self.T_rng.normal(scale.shape, std=self.scale_std)
         return location, scale
 
-# this belongs on SpatialAttention as a static method, but that breaks pickling
+# this belongs on RecurrentAttentionModel as a static method, but that breaks pickling
 def static_map_to_input_space(location, scale, patch_shape, image_shape):
     # linearly map locations from (-1, 1) to image index space
     location = (location + 1) / 2 * image_shape
@@ -111,57 +111,13 @@ def static_map_to_input_space(location, scale, patch_shape, image_shape):
     scale += patch_shape / image_shape
     return location, scale
 
-class SpatialAttention(Brick):
-    def __init__(self, locator, cropper, merger, **kwargs):
-        super(SpatialAttention, self).__init__(**kwargs)
+class RecurrentAttentionModel(bricks.BaseRecurrent):
+    def __init__(self, rnn, locator, cropper, merger, emitter, batch_normalize, attention_state_name, h2h_transforms, **kwargs):
+        super(RecurrentAttentionModel, self).__init__(**kwargs)
 
         self.locator = locator
         self.cropper = cropper
         self.merger = merger
-
-        self.children = [self.locator, self.cropper, self.merger]
-
-    def map_to_input_space(self, location, scale):
-        return static_map_to_input_space(
-            location, scale,
-            T.cast(self.cropper.patch_shape, floatX),
-            T.cast(self.cropper.image_shape, floatX))
-
-    def compute_initial_location_scale(self, x):
-        location = T.alloc(T.cast(0.0, floatX),
-                           x.shape[0], self.cropper.n_spatial_dims)
-        scale = T.zeros_like(location)
-        return location, scale
-
-    @application(inputs=['x', 'h'], outputs=['u'])
-    def apply(self, x, h):
-        location, scale = self.locator.apply(h)
-        patch = self.crop(x, location, scale)
-        u = self.merger.apply(patch, location, scale)
-        return u
-
-    def crop(self, x, location, scale):
-        true_location, true_scale = self.map_to_input_space(location, scale)
-        patch = self.cropper.apply(x, true_location, true_scale)
-        self.add_auxiliary_variable(location, name="location")
-        self.add_auxiliary_variable(scale, name="scale")
-        self.add_auxiliary_variable(true_location, name="true_location")
-        self.add_auxiliary_variable(true_scale, name="true_scale")
-        self.add_auxiliary_variable(patch, name="patch")
-        return patch
-
-    @application(inputs=['x'], outputs="u".split())
-    def compute_initial_input(self, x):
-        location, scale = self.compute_initial_location_scale(x)
-        patch = self.crop(x, location, scale)
-        u = self.merger.apply(patch, location, scale)
-        return u
-
-class RecurrentAttentionModel(bricks.BaseRecurrent):
-    def __init__(self, rnn, attention, emitter, batch_normalize, attention_state_name, h2h_transforms, **kwargs):
-        super(RecurrentAttentionModel, self).__init__(**kwargs)
-
-        self.attention = attention
         self.emitter = emitter
 
         self.rnn = rnn
@@ -173,7 +129,9 @@ class RecurrentAttentionModel(bricks.BaseRecurrent):
         # name of the RNN state that determines the parameters of the next glimpse
         self.attention_state_name = attention_state_name
 
-        self.children = ([self.rnn, self.attention, self.emitter, self.identity]
+        self.children = ([self.rnn,
+                          self.locator, self.cropper, self.merger,
+                          self.emitter, self.identity]
                          + list(self.h2h_transforms.values()))
 
         # states aren't known until now
@@ -188,7 +146,9 @@ class RecurrentAttentionModel(bricks.BaseRecurrent):
 
     @application
     def apply(self, x, **states):
-        u = self.attention.apply(x, states[self.attention_state_name])
+        location, scale = self.locator.apply(states[self.attention_state_name])
+        patch = self.crop(x, location, scale)
+        u = self.merger.apply(patch, location, scale)
         states = OrderedDict((key, self.h2h_transforms.get(key, self.identity).apply(value))
                              for key, value in states.items())
         states = self.rnn.apply(inputs=u, iterate=False, as_dict=True, **states)
@@ -198,6 +158,26 @@ class RecurrentAttentionModel(bricks.BaseRecurrent):
     def compute_initial_state(self, x):
         initial_states = self.rnn.initial_states(x.shape[0], as_dict=True)
         # condition on initial shrink-to-fit patch
-        u = self.attention.compute_initial_input(x)
+        location = T.alloc(T.cast(0.0, floatX),
+                           x.shape[0], self.cropper.n_spatial_dims)
+        scale = T.zeros_like(location)
+        patch = self.crop(x, location, scale)
+        u = self.merger.apply(patch, location, scale)
         conditioned_states = self.rnn.apply(as_dict=True, inputs=u, iterate=False, **initial_states)
         return tuple(conditioned_states.values())
+
+    def crop(self, x, location, scale):
+        true_location, true_scale = self.map_to_input_space(location, scale)
+        patch = self.cropper.apply(x, true_location, true_scale)
+        self.add_auxiliary_variable(location, name="location")
+        self.add_auxiliary_variable(scale, name="scale")
+        self.add_auxiliary_variable(true_location, name="true_location")
+        self.add_auxiliary_variable(true_scale, name="true_scale")
+        self.add_auxiliary_variable(patch, name="patch")
+        return patch
+
+    def map_to_input_space(self, location, scale):
+        return static_map_to_input_space(
+            location, scale,
+            T.cast(self.cropper.patch_shape, floatX),
+            T.cast(self.cropper.image_shape, floatX))
