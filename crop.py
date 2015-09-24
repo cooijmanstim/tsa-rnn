@@ -5,19 +5,19 @@ import theano.tensor as T
 
 floatX = theano.config.floatX
 
-from blocks.bricks import Softmax, Rectifier, Brick, application, MLP
+from blocks.bricks import Brick, application
 
 import util
 
 class LocallySoftRectangularCropper(Brick):
-    def __init__(self, n_spatial_dims, image_shape, patch_shape, kernel, batched_window=False, cutoff=3, **kwargs):
+    def __init__(self, image_shape, patch_shape, kernel, hyperparameters, **kwargs):
         super(LocallySoftRectangularCropper, self).__init__(**kwargs)
         self.image_shape = T.cast(image_shape, 'int16')
         self.patch_shape = patch_shape
         self.kernel = kernel
-        self.cutoff = cutoff
-        self.n_spatial_dims = n_spatial_dims
-        self.batched_window = batched_window
+        self.cutoff = hyperparameters["cutoff"]
+        self.batched_window = hyperparameters["batched_window"]
+        self.n_spatial_dims = len(patch_shape)
 
     def compute_crop_matrices(self, locations, scales, Is):
         Ws = []
@@ -115,12 +115,12 @@ class LocallySoftRectangularCropper(Brick):
         return patch
 
 class SoftRectangularCropper(Brick):
-    def __init__(self, n_spatial_dims, image_shape, patch_shape, kernel, **kwargs):
+    def __init__(self, image_shape, patch_shape, kernel, **kwargs):
         super(SoftRectangularCropper, self).__init__(**kwargs)
+        self.image_shape = T.cast(image_shape, 'int16')
         self.patch_shape = patch_shape
-        self.image_shape = image_shape
         self.kernel = kernel
-        self.n_spatial_dims = n_spatial_dims
+        self.n_spatial_dims = len(patch_shape)
         self.precompute()
 
     def precompute(self):

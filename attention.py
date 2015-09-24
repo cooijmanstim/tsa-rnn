@@ -31,19 +31,18 @@ def static_map_to_input_space(location, scale, patch_shape, image_shape):
     scale += patch_shape / image_shape
     return location, scale
 
-class RecurrentAttentionModel(bricks.BaseRecurrent):
-    def __init__(self, rnn, cropper, emitter, embed_mlp,
+class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
+    def __init__(self, rnn, cropper, emitter, hooks,
                  attention_state_name, hyperparameters, **kwargs):
         super(RecurrentAttentionModel, self).__init__(**kwargs)
 
         self.cropper = cropper
         self.emitter = emitter
         self.rnn = rnn
-        self.embed_mlp = embed_mlp
-
-        self.construct_locator(**hyperparameters)
-        self.construct_merger(output_dim=embed_mlp.input_dim,
-                              **hyperparameters)
+        self.embed_mlp = hooks["embed_mlp"]
+        self.construct_locator(hooks=hooks, **hyperparameters)
+        self.construct_merger(output_dim=self.embed_mlp.input_dim,
+                              hooks=hooks, **hyperparameters)
 
         # name of the RNN state that determines the parameters of the next glimpse
         self.attention_state_name = attention_state_name
@@ -54,14 +53,13 @@ class RecurrentAttentionModel(bricks.BaseRecurrent):
         self.apply.outputs = self.rnn.apply.outputs
         self.compute_initial_state.outputs = self.rnn.apply.outputs
 
-    def construct_merger(merge_mlp, output_dim, patch_transform,
-                         batch_normalize, **kwargs):
-        self.merge_mlp = merge_mlp
-        self.patch_transform = patch_transform
+    def construct_merger(self, hooks, output_dim, batch_normalize, **kwargs):
+        self.merge_mlp = hooks["merge_mlp"]
+        self.patch_transform = hooks["patch_transform"]
         self.response_merge = bricks.Merge(
             input_names="area patch".split(),
-            input_dims=[merge_mlp.brick.output_dim,
-                        patch_transform.brick.output_dim],
+            input_dims=[self.merge_mlp.output_dim,
+                        self.patch_transform.output_dim],
             output_dim=output_dim,
             prototype=bricks.Linear(use_bias=False),
             child_prefix="response_merge")
@@ -72,16 +70,16 @@ class RecurrentAttentionModel(bricks.BaseRecurrent):
         self.children.extend([
             self.response_merge_activation,
             self.response_merge,
-            self.patch_transform.brick,
-            self.merge_mlp.brick])
+            self.patch_transform,
+            self.merge_mlp])
 
-    def construct_locator(locate_mlp, n_spatial_dims,
+    def construct_locator(self, hooks, n_spatial_dims,
                           location_std, scale_std, **kwargs):
         self.n_spatial_dims = n_spatial_dims
-        self.locate_mlp = locate_mlp
+        self.locate_mlp = hooks["locate_mlp"]
 
         self.theta_from_area = bricks.Linear(
-            input_dim=locate_mlp.brick.output_dim,
+            input_dim=self.locate_mlp.output_dim,
             output_dim=2*n_spatial_dims,
             name="theta_from_area")
 
@@ -90,7 +88,7 @@ class RecurrentAttentionModel(bricks.BaseRecurrent):
         self.scale_std = scale_std
 
         self.children.extend([
-            self.locate_mlp.brick,
+            self.locate_mlp,
             self.theta_from_area])
 
     def get_dim(self, name):
@@ -99,16 +97,21 @@ class RecurrentAttentionModel(bricks.BaseRecurrent):
         except:
             return super(RecurrentAttentionModel, self).get_dim(name)
 
+    def initialize(self, *args, **kwargs):
+        super(RecurrentAttentionModel, self).initialize(*args, **kwargs)
+        for rnn in self.rnn.transitions:
+            initialization.Identity().initialize(rnn.W_state, rnn.rng)
+
     @application
     def apply(self, x, **states):
         location, scale = self.locate(states[self.attention_state_name])
         patch = self.crop(x, location, scale)
-        u = self.embed_mlp(self.merge(patch, location, scale))
+        u = self.embed_mlp.apply(self.merge(patch, location, scale))
         states = self.rnn.apply(inputs=u, iterate=False, as_dict=True, **states)
         return tuple(states.values())
         
     def locate(self, h):
-        area = self.locate_mlp(h)
+        area = self.locate_mlp.apply(h)
         theta = self.theta_from_area.apply(area)
         # going from area to theta is typically a huge reduction
         # in dimensionality; divide each output by the fan-in to avoid
@@ -121,9 +124,9 @@ class RecurrentAttentionModel(bricks.BaseRecurrent):
         return location, scale
 
     def merge(self, patch, location, scale):
-        patch = self.patch_transform(patch)
-        area = self.merge_mlp(T.concatenate([location, scale], axis=1))
-        parts = self.response_merge.apply(area, patch)
+        patch = self.patch_transform.apply(patch)
+        area = self.merge_mlp.apply(T.concatenate([location, scale], axis=1))
+        response = self.response_merge.apply(area, patch)
         return self.response_merge_activation.apply(response)
 
     @application
@@ -134,7 +137,7 @@ class RecurrentAttentionModel(bricks.BaseRecurrent):
                            x.shape[0], self.cropper.n_spatial_dims)
         scale = T.zeros_like(location)
         patch = self.crop(x, location, scale)
-        u = self.embed_mlp(self.merge(patch, location, scale))
+        u = self.embed_mlp.apply(self.merge(patch, location, scale))
         conditioned_states = self.rnn.apply(as_dict=True, inputs=u, iterate=False, **initial_states)
         return tuple(conditioned_states.values())
 

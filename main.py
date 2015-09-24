@@ -36,38 +36,6 @@ from dump import Dump, DumpMinimum, PrintingTo, load_model_parameters
 
 floatX = theano.config.floatX
 
-class Ram(object):
-    def __init__(self, hidden_dim, emitter, hyperparameters, **kwargs):
-        self.rnn = bricks.RecurrentStack(
-            [bricks.LSTM(activation=bricks.Tanh(), dim=hidden_dim),
-             bricks.LSTM(activation=bricks.Tanh(), dim=hidden_dim)],
-            weights_init=initialization.IsotropicGaussian(1e-4),
-            biases_init=initialization.Constant(0))
-        cropper = crop.LocallySoftRectangularCropper(
-            kernel=crop.Gaussian(), **hyperparameters)
-        self.model = attention.RecurrentAttentionModel(
-            self.rnn, cropper, emitter,
-            # attend based on upper RNN states
-            attention_state_name="states#1",
-            name="ram",
-            hyperparameters=hyperparameters)
-
-    def initialize(self):
-        self.model.initialize()
-        for rnn in self.rnn.transitions:
-            initialization.Identity().initialize(rnn.W_state, rnn.rng)
-
-    def compute(self, x, n_patches):
-        states = []
-        states.append(self.model.compute_initial_state(x, as_dict=True))
-        n_steps = n_patches - 1
-        for i in xrange(n_steps):
-            states.append(self.model.apply(x=x, as_dict=True, **states[-1]))
-        outputs = T.concatenate([state["states"][:, np.newaxis, :]
-                                 for state in states],
-                                axis=1)
-        return outputs
-
 def get_task(task_name, hyperparameters, **kwargs):
     klass = dict(mnist=mnist.Task,
                  cluttered_mnist_video=cluttered_mnist_video.Task,
@@ -75,11 +43,12 @@ def get_task(task_name, hyperparameters, **kwargs):
                  svhn_number=goodfellow_svhn.NumberTask)[task_name]
     return klass(**hyperparameters)
 
-def construct_model(task, patch_shape, initargs, n_channels, n_spatial_dims, hidden_dim,
-                    batch_normalize,
-                    hyperparameters, patch_cnn_spec=None, patch_mlp_spec=None,
-                    locate_mlp_spec=[], merge_mlp_spec=[], embed_mlp_spec=[],
-                    **kwargs):
+def construct_model(task, image_shape, patch_shape, initargs,
+                    n_channels, n_spatial_dims, hidden_dim,
+                    batch_normalize, hyperparameters,
+                    patch_cnn_spec=None, patch_mlp_spec=None,
+                    locate_mlp_spec=[], merge_mlp_spec=[],
+                    embed_mlp_spec=[], **kwargs):
     patch_transforms = []
     if patch_cnn_spec:
         patch_transforms.append(masonry.construct_cnn(
@@ -119,7 +88,7 @@ def construct_model(task, patch_shape, initargs, n_channels, n_spatial_dims, hid
     embed_mlp_activations = [None for dim in embed_mlp_spec[1:]]
     embed_mlp_spec.append(4*hidden_dim)
     embed_mlp_activations.append(bricks.Identity())
-    response_transform = masonry.construct_mlp(
+    embed_mlp = masonry.construct_mlp(
         name="embed_mlp",
         hidden_dims=embed_mlp_spec[1:],
         input_dim=embed_mlp_spec[0],
@@ -127,14 +96,35 @@ def construct_model(task, patch_shape, initargs, n_channels, n_spatial_dims, hid
         activations=embed_mlp_activations,
         initargs=initargs)
 
-    emitter = task.get_emitter(**hyperparameters)
+    cropper = crop.LocallySoftRectangularCropper(
+        name="cropper", kernel=crop.Gaussian(),
+        image_shape=image_shape, patch_shape=patch_shape,
+        hyperparameters=hyperparameters)
 
-    return Ram(patch_transform=patch_transform.apply,
-               locate_mlp=locate_mlp.apply,
-               merge_mlp=merge_mlp.apply,
-               embed_mlp=embed_mlp.apply,
-               emitter=emitter,
-               **hyperparameters)
+    rnn = bricks.RecurrentStack(
+        [bricks.LSTM(activation=bricks.Tanh(), dim=hidden_dim),
+         bricks.LSTM(activation=bricks.Tanh(), dim=hidden_dim)])
+
+    emitter = task.get_emitter(**hyperparameters)
+    
+    model = attention.RecurrentAttentionModel(
+        rnn=rnn, cropper=cropper, emitter=emitter,
+        hooks=dict(locate_mlp=locate_mlp,
+                   merge_mlp=merge_mlp,
+                   embed_mlp=embed_mlp,
+                   patch_transform=patch_transform),
+        # attend based on upper RNN states
+        attention_state_name="states#1",
+        name="ram", hyperparameters=hyperparameters,
+        # blocks' push_initialization_config stinks; it overwrites everything
+        # that comes in its way, leaving us with no good way to specialize
+        # initialization for e.g. convolution layers deep inside the model.
+        # so we are doomed to use one initializer that "works" for every
+        # situation.
+        weights_init=initialization.IsotropicGaussian(std=1e-3),
+        biases_init=initialization.Constant(0))
+
+    return model
 
 def construct_monitors(algorithm, task, n_patches, x, x_uncentered, hs, 
                        graph, name, ram, model, cost,
@@ -196,7 +186,7 @@ def construct_monitors(algorithm, task, n_patches, x, x_uncentered, hs,
 
     if patchmonitor_klass:
         # get patches from original (uncentered) images
-        patch = T.stack(*[ram.attention.crop(x_uncentered, location[:, i, :], scale[:, i, :])
+        patch = T.stack(*[ram.crop(x_uncentered, location[:, i, :], scale[:, i, :])
                           for i in xrange(n_patches)])
         patch = patch.dimshuffle(1, 0, *range(2, patch.ndim))
         patch_extractor = theano.function([x_uncentered], [location, scale, patch])
@@ -242,7 +232,15 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
     ram = construct_model(task=task, **hyperparameters)
     ram.initialize()
 
-    hs = ram.compute(x, n_patches)
+    states = []
+    states.append(ram.compute_initial_state(x, as_dict=True))
+    n_steps = n_patches - 1
+    for i in xrange(n_steps):
+        states.append(ram.apply(x=x, as_dict=True, **states[-1]))
+    hs = T.concatenate([state["states"][:, np.newaxis, :]
+                        for state in states],
+                       axis=1)
+
     cost = ram.emitter.cost(hs, y, n_patches)
     cost.name = "cost"
 
