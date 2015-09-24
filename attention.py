@@ -121,9 +121,6 @@ class RecurrentAttentionModel(bricks.BaseRecurrent):
         return location, scale
 
     def merge(self, patch, location, scale):
-        # don't backpropagate through these to avoid the model using
-        # the location/scale as merely additional hidden units
-        #location, scale = list(map(theano.gradient.disconnected_grad, (location, scale)))
         patch = self.patch_transform(patch)
         area = self.postmerge_area_transform(T.concatenate([location, scale], axis=1))
         parts = self.response_merge.apply(area, patch)
