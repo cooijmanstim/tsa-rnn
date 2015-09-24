@@ -38,7 +38,7 @@ floatX = theano.config.floatX
 
 class Ram(object):
     def __init__(self, image_shape, patch_shape, hidden_dim,
-                 n_spatial_dims, whatwhere_interaction, prefork_area_transform,
+                 n_spatial_dims, prefork_area_transform,
                  postmerge_area_transform, patch_transform, batch_normalize,
                  response_transform, location_std, scale_std, cutoff,
                  batched_window, initargs, emitter, **kwargs):
@@ -65,7 +65,6 @@ class Ram(object):
             patch_transform=patch_transform,
             postmerge_area_transform=postmerge_area_transform,
             response_transform=response_transform,
-            whatwhere_interaction=whatwhere_interaction,
             batch_normalize=batch_normalize,
             name="ram")
 

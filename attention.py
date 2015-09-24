@@ -53,16 +53,15 @@ class RecurrentAttentionModel(bricks.BaseRecurrent):
         self.compute_initial_state.outputs = self.rnn.apply.outputs
 
     def construct_merger(postmerge_area_transform, patch_transform, response_transform,
-                         n_spatial_dims, whatwhere_interaction, batch_normalize,
+                         n_spatial_dims, batch_normalize,
                          **kwargs):
         self.postmerge_area_transform = postmerge_area_transform
         self.patch_transform = patch_transform
-        self.whatwhere_interaction = whatwhere_interaction
-        self.response_merge = bricks.Parallel(
+        self.response_merge = bricks.Merge(
             input_names="area patch".split(),
             input_dims=[postmerge_area_transform.brick.output_dim,
                         patch_transform.brick.output_dim],
-            output_dims=2*[response_transform.brick.input_dim],
+            output_dim=response_transform.brick.input_dim,
             prototype=bricks.Linear(use_bias=False),
             child_prefix="response_merge")
         self.response_merge_activation = bricks.NormalizedActivation(
@@ -128,10 +127,6 @@ class RecurrentAttentionModel(bricks.BaseRecurrent):
         patch = self.patch_transform(patch)
         area = self.postmerge_area_transform(T.concatenate([location, scale], axis=1))
         parts = self.response_merge.apply(area, patch)
-        if self.whatwhere_interaction == "additive":
-            response = sum(parts)
-        elif self.whatwhere_interaction == "multiplicative":
-            response = reduce(operator.mul, parts)
         response = self.response_merge_activation.apply(response)
         response = self.response_transform(response)
         return response
