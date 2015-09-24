@@ -32,46 +32,47 @@ def static_map_to_input_space(location, scale, patch_shape, image_shape):
     return location, scale
 
 class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
-    def __init__(self, rnn, cropper, emitter, hooks,
+    def __init__(self, rnn, cropper, embedder, emitter, hooks,
                  attention_state_name, hyperparameters, **kwargs):
         super(RecurrentAttentionModel, self).__init__(**kwargs)
 
         self.cropper = cropper
+        self.embedder = embedder
         self.emitter = emitter
         self.rnn = rnn
-        self.embed_mlp = hooks["embed_mlp"]
         self.construct_locator(hooks=hooks, **hyperparameters)
-        self.construct_merger(output_dim=self.embed_mlp.input_dim,
-                              hooks=hooks, **hyperparameters)
+        self.construct_merger(hooks=hooks, **hyperparameters)
 
         # name of the RNN state that determines the parameters of the next glimpse
         self.attention_state_name = attention_state_name
 
-        self.children.extend([self.rnn, self.cropper, self.emitter, self.embed_mlp])
+        self.children.extend([self.rnn, self.cropper, self.embedder, self.emitter])
 
         # states aren't known until now
         self.apply.outputs = self.rnn.apply.outputs
         self.compute_initial_state.outputs = self.rnn.apply.outputs
 
-    def construct_merger(self, hooks, output_dim, batch_normalize, **kwargs):
+    def construct_merger(self, hooks, response_dim, batch_normalize, **kwargs):
         self.merge_mlp = hooks["merge_mlp"]
         self.patch_transform = hooks["patch_transform"]
         self.response_merge = bricks.Merge(
             input_names="area patch".split(),
             input_dims=[self.merge_mlp.output_dim,
                         self.patch_transform.output_dim],
-            output_dim=output_dim,
+            output_dim=response_dim,
             prototype=bricks.Linear(use_bias=False),
             child_prefix="response_merge")
         self.response_merge_activation = bricks.NormalizedActivation(
-            shape=[output_dim],
+            shape=[response_dim],
             name="response_merge_activation",
             batch_normalize=batch_normalize)
+        self.response_mlp = hooks["response_mlp"]
         self.children.extend([
             self.response_merge_activation,
             self.response_merge,
             self.patch_transform,
-            self.merge_mlp])
+            self.merge_mlp,
+            self.response_mlp])
 
     def construct_locator(self, hooks, n_spatial_dims,
                           location_std, scale_std, **kwargs):
@@ -106,7 +107,7 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
     def apply(self, x, **states):
         location, scale = self.locate(states[self.attention_state_name])
         patch = self.crop(x, location, scale)
-        u = self.embed_mlp.apply(self.merge(patch, location, scale))
+        u = self.embedder.apply(self.merge(patch, location, scale))
         states = self.rnn.apply(inputs=u, iterate=False, as_dict=True, **states)
         return tuple(states.values())
         
@@ -127,7 +128,8 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
         patch = self.patch_transform.apply(patch)
         area = self.merge_mlp.apply(T.concatenate([location, scale], axis=1))
         response = self.response_merge.apply(area, patch)
-        return self.response_merge_activation.apply(response)
+        response = self.response_merge_activation.apply(response)
+        return self.response_mlp.apply(response)
 
     @application
     def compute_initial_state(self, x):
@@ -137,7 +139,7 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
                            x.shape[0], self.cropper.n_spatial_dims)
         scale = T.zeros_like(location)
         patch = self.crop(x, location, scale)
-        u = self.embed_mlp.apply(self.merge(patch, location, scale))
+        u = self.embedder.apply(self.merge(patch, location, scale))
         conditioned_states = self.rnn.apply(as_dict=True, inputs=u, iterate=False, **initial_states)
         return tuple(conditioned_states.values())
 

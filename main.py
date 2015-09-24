@@ -45,10 +45,10 @@ def get_task(task_name, hyperparameters, **kwargs):
 
 def construct_model(task, image_shape, patch_shape, initargs,
                     n_channels, n_spatial_dims, hidden_dim,
-                    batch_normalize, hyperparameters,
+                    response_dim, batch_normalize, hyperparameters,
                     patch_cnn_spec=None, patch_mlp_spec=None,
                     locate_mlp_spec=[], merge_mlp_spec=[],
-                    embed_mlp_spec=[], **kwargs):
+                    response_mlp_spec=[], **kwargs):
     patch_transforms = []
     if patch_cnn_spec:
         patch_transforms.append(masonry.construct_cnn(
@@ -84,22 +84,21 @@ def construct_model(task, image_shape, patch_shape, initargs,
         batch_normalize=batch_normalize,
         initargs=initargs)
 
-    # LSTM requires the input to have dim=4*hidden_dim
-    embed_mlp_activations = [None for dim in embed_mlp_spec[1:]]
-    embed_mlp_spec.append(4*hidden_dim)
-    embed_mlp_activations.append(bricks.Identity())
-    embed_mlp = masonry.construct_mlp(
-        name="embed_mlp",
-        hidden_dims=embed_mlp_spec[1:],
-        input_dim=embed_mlp_spec[0],
+    response_mlp = masonry.construct_mlp(
+        name="response_mlp",
+        hidden_dims=response_mlp_spec,
+        input_dim=response_dim,
         batch_normalize=batch_normalize,
-        activations=embed_mlp_activations,
         initargs=initargs)
 
     cropper = crop.LocallySoftRectangularCropper(
         name="cropper", kernel=crop.Gaussian(),
         image_shape=image_shape, patch_shape=patch_shape,
         hyperparameters=hyperparameters)
+    
+    embedder = bricks.Linear(input_dim=response_mlp.output_dim,
+                             output_dim=4*hidden_dim,
+                             use_bias=True)
 
     rnn = bricks.RecurrentStack(
         [bricks.LSTM(activation=bricks.Tanh(), dim=hidden_dim),
@@ -108,10 +107,10 @@ def construct_model(task, image_shape, patch_shape, initargs,
     emitter = task.get_emitter(**hyperparameters)
     
     model = attention.RecurrentAttentionModel(
-        rnn=rnn, cropper=cropper, emitter=emitter,
+        rnn=rnn, cropper=cropper, embedder=embedder, emitter=emitter,
         hooks=dict(locate_mlp=locate_mlp,
                    merge_mlp=merge_mlp,
-                   embed_mlp=embed_mlp,
+                   response_mlp=response_mlp,
                    patch_transform=patch_transform),
         # attend based on upper RNN states
         attention_state_name="states#1",
