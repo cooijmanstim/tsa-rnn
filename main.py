@@ -76,33 +76,25 @@ class Ram(object):
         else:
             h2h_transforms = []
 
-        self.locator = attention.Locator(
-            hidden_dim, n_spatial_dims,
-            area_transform=prefork_area_transform,
-            location_std=location_std,
-            scale_std=scale_std,
-            **initargs)
         self.cropper = crop.LocallySoftRectangularCropper(
             n_spatial_dims=n_spatial_dims,
             image_shape=image_shape, patch_shape=patch_shape,
             kernel=crop.Gaussian(), cutoff=cutoff,
             batched_window=batched_window)
-        self.merger = attention.Merger(
-            patch_transform=patch_transform,
-            area_transform=postmerge_area_transform,
-            response_transform=response_transform,
-            n_spatial_dims=n_spatial_dims,
-            whatwhere_interaction=whatwhere_interaction,
-            batch_normalize=batch_normalize,
-            **initargs)
         self.emitter = emitter
         self.model = attention.RecurrentAttentionModel(
-            self.rnn,
-            self.locator, self.cropper, self.merger,
-            self.emitter,
+            self.rnn, self.cropper, self.emitter,
             # attend based on upper RNN states
             attention_state_name="states#1",
             h2h_transforms=h2h_transforms,
+            n_spatial_dims=n_spatial_dims,
+            location_std=location_std,
+            scale_std=scale_std,
+            prefork_area_transform=prefork_area_transform,
+            patch_transform=patch_transform,
+            postmerge_area_transform=postmerge_area_transform,
+            response_transform=response_transform,
+            whatwhere_interaction=whatwhere_interaction,
             batch_normalize=batch_normalize,
             name="ram")
 
