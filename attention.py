@@ -32,7 +32,7 @@ def static_map_to_input_space(location, scale, patch_shape, image_shape):
     return location, scale
 
 class RecurrentAttentionModel(bricks.BaseRecurrent):
-    def __init__(self, rnn, cropper, emitter, batch_normalize, attention_state_name, h2h_transforms, **kwargs):
+    def __init__(self, rnn, cropper, emitter, batch_normalize, attention_state_name, **kwargs):
         super(RecurrentAttentionModel, self).__init__(**kwargs)
 
         self.construct_locator(**kwargs)
@@ -42,16 +42,11 @@ class RecurrentAttentionModel(bricks.BaseRecurrent):
         self.emitter = emitter
         self.rnn = rnn
 
-        # a dict mapping recurrentstack state names to applications
-        self.h2h_transforms = dict(h2h_transforms)
-        self.identity = bricks.Identity()
-
         # name of the RNN state that determines the parameters of the next glimpse
         self.attention_state_name = attention_state_name
 
         self.children.extend(
-            [self.rnn, self.cropper, self.emitter, self.identity]
-            + list(self.h2h_transforms.values()))
+            [self.rnn, self.cropper, self.emitter, self.identity])
 
         # states aren't known until now
         self.apply.outputs = self.rnn.apply.outputs
@@ -110,8 +105,6 @@ class RecurrentAttentionModel(bricks.BaseRecurrent):
         location, scale = self.locate(states[self.attention_state_name])
         patch = self.crop(x, location, scale)
         u = self.merge(patch, location, scale)
-        states = OrderedDict((key, self.h2h_transforms.get(key, self.identity).apply(value))
-                             for key, value in states.items())
         states = self.rnn.apply(inputs=u, iterate=False, as_dict=True, **states)
         return tuple(states.values())
         

@@ -26,7 +26,6 @@ import attention
 import crop
 import util
 from patchmonitor import PatchMonitoring, VideoPatchMonitoring
-import lstm
 
 import mnist
 import cluttered_mnist_video
@@ -40,41 +39,14 @@ floatX = theano.config.floatX
 class Ram(object):
     def __init__(self, image_shape, patch_shape, hidden_dim,
                  n_spatial_dims, whatwhere_interaction, prefork_area_transform,
-                 postmerge_area_transform, patch_transform,
-                 batch_normalize,
-                 batch_normalize_input_gate,
-                 batch_normalize_forget_gate,
-                 batch_normalize_output_gate,
-                 insert_h2h_transforms,
+                 postmerge_area_transform, patch_transform, batch_normalize,
                  response_transform, location_std, scale_std, cutoff,
                  batched_window, initargs, emitter, **kwargs):
         self.rnn = bricks.RecurrentStack(
-            [lstm.instantiate(activation=bricks.Tanh(), dim=hidden_dim,
-                              batch_normalize=batch_normalize,
-                              batch_normalize_input_gate=batch_normalize_input_gate,
-                              batch_normalize_forget_gate=batch_normalize_forget_gate,
-                              batch_normalize_output_gate=batch_normalize_output_gate),
-             lstm.instantiate(activation=bricks.Tanh(), dim=hidden_dim,
-                              batch_normalize=batch_normalize,
-                              batch_normalize_input_gate=batch_normalize_input_gate,
-                              batch_normalize_forget_gate=batch_normalize_forget_gate,
-                              batch_normalize_output_gate=batch_normalize_output_gate)],
+            [bricks.LSTM(activation=bricks.Tanh(), dim=hidden_dim),
+             bricks.LSTM(activation=bricks.Tanh(), dim=hidden_dim)],
             weights_init=initialization.IsotropicGaussian(1e-4),
             biases_init=initialization.Constant(0))
-
-        if insert_h2h_transforms:
-            h2h_transforms = dict(
-                (state, masonry.construct_mlp(
-                    name="h2h_%s" % state,
-                    activations=[None],
-                    input_dim=self.rnn.get_dim(state),
-                    hidden_dims=[self.rnn.get_dim(state)],
-                    batch_normalize=batch_normalize,
-                    initargs=dict(weights_init=initialization.Identity(),
-                                biases_init=initialization.Constant(0))))
-                for state in "states states#1".split())
-        else:
-            h2h_transforms = []
 
         self.cropper = crop.LocallySoftRectangularCropper(
             n_spatial_dims=n_spatial_dims,
@@ -86,7 +58,6 @@ class Ram(object):
             self.rnn, self.cropper, self.emitter,
             # attend based on upper RNN states
             attention_state_name="states#1",
-            h2h_transforms=h2h_transforms,
             n_spatial_dims=n_spatial_dims,
             location_std=location_std,
             scale_std=scale_std,
