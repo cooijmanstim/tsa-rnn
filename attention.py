@@ -32,66 +32,66 @@ def static_map_to_input_space(location, scale, patch_shape, image_shape):
     return location, scale
 
 class RecurrentAttentionModel(bricks.BaseRecurrent):
-    def __init__(self, rnn, cropper, emitter, batch_normalize, attention_state_name, **kwargs):
+    def __init__(self, rnn, cropper, emitter, embed_mlp,
+                 attention_state_name, hyperparameters, **kwargs):
         super(RecurrentAttentionModel, self).__init__(**kwargs)
-
-        self.construct_locator(**kwargs)
-        self.construct_merger(**kwargs)
 
         self.cropper = cropper
         self.emitter = emitter
         self.rnn = rnn
+        self.embed_mlp = embed_mlp
+
+        self.construct_locator(**hyperparameters)
+        self.construct_merger(output_dim=embed_mlp.input_dim,
+                              **hyperparameters)
 
         # name of the RNN state that determines the parameters of the next glimpse
         self.attention_state_name = attention_state_name
 
-        self.children.extend(
-            [self.rnn, self.cropper, self.emitter, self.identity])
+        self.children.extend([self.rnn, self.cropper, self.emitter, self.embed_mlp])
 
         # states aren't known until now
         self.apply.outputs = self.rnn.apply.outputs
         self.compute_initial_state.outputs = self.rnn.apply.outputs
 
-    def construct_merger(postmerge_area_transform, patch_transform, response_transform,
-                         n_spatial_dims, batch_normalize,
-                         **kwargs):
-        self.postmerge_area_transform = postmerge_area_transform
+    def construct_merger(merge_mlp, output_dim, patch_transform,
+                         batch_normalize, **kwargs):
+        self.merge_mlp = merge_mlp
         self.patch_transform = patch_transform
         self.response_merge = bricks.Merge(
             input_names="area patch".split(),
-            input_dims=[postmerge_area_transform.brick.output_dim,
+            input_dims=[merge_mlp.brick.output_dim,
                         patch_transform.brick.output_dim],
-            output_dim=response_transform.brick.input_dim,
+            output_dim=output_dim,
             prototype=bricks.Linear(use_bias=False),
             child_prefix="response_merge")
         self.response_merge_activation = bricks.NormalizedActivation(
-            shape=[response_transform.brick.input_dim],
+            shape=[output_dim],
             name="response_merge_activation",
             batch_normalize=batch_normalize)
-        self.response_transform = response_transform
         self.children.extend([
             self.response_merge_activation,
             self.response_merge,
             self.patch_transform.brick,
-            self.postmerge_area_transform.brick,
-            self.response_transform.brick])
+            self.merge_mlp.brick])
 
-    def construct_locator(prefork_area_transform, n_spatial_dims, location_std, scale_std, **kwargs):
+    def construct_locator(locate_mlp, n_spatial_dims,
+                          location_std, scale_std, **kwargs):
         self.n_spatial_dims = n_spatial_dims
-        self.prefork_area_transform = prefork_area_transform
+        self.locate_mlp = locate_mlp
 
-        self.locationscale = bricks.Linear(
-            input_dim=prefork_area_transform.brick.output_dim,
+        self.theta_from_area = bricks.Linear(
+            input_dim=locate_mlp.brick.output_dim,
             output_dim=2*n_spatial_dims,
-            name="locationscale")
+            name="theta_from_area")
 
         self.T_rng = theano.sandbox.rng_mrg.MRG_RandomStreams(12345)
         self.location_std = location_std
         self.scale_std = scale_std
 
         self.children.extend([
-            self.prefork_area_transform.brick,
-            self.locationscale])
+            self.locate_mlp.brick,
+            self.theta_from_area])
 
     def get_dim(self, name):
         try:
@@ -103,30 +103,28 @@ class RecurrentAttentionModel(bricks.BaseRecurrent):
     def apply(self, x, **states):
         location, scale = self.locate(states[self.attention_state_name])
         patch = self.crop(x, location, scale)
-        u = self.merge(patch, location, scale)
+        u = self.embed_mlp(self.merge(patch, location, scale))
         states = self.rnn.apply(inputs=u, iterate=False, as_dict=True, **states)
         return tuple(states.values())
         
     def locate(self, h):
-        area = self.prefork_area_transform(h)
-        locationscale = self.locationscale.apply(area)
-        # going from area to locationscale is typically a huge reduction
+        area = self.locate_mlp(h)
+        theta = self.theta_from_area.apply(area)
+        # going from area to theta is typically a huge reduction
         # in dimensionality; divide each output by the fan-in to avoid
         # large values
-        locationscale /= self.locationscale.input_dim
-        location, scale = (locationscale[:, :self.n_spatial_dims],
-                           locationscale[:, self.n_spatial_dims:])
+        theta /= self.theta_from_area.input_dim
+        location, scale = (theta[:, :self.n_spatial_dims],
+                           theta[:, self.n_spatial_dims:])
         location += self.T_rng.normal(location.shape, std=self.location_std)
         scale += self.T_rng.normal(scale.shape, std=self.scale_std)
         return location, scale
 
     def merge(self, patch, location, scale):
         patch = self.patch_transform(patch)
-        area = self.postmerge_area_transform(T.concatenate([location, scale], axis=1))
+        area = self.merge_mlp(T.concatenate([location, scale], axis=1))
         parts = self.response_merge.apply(area, patch)
-        response = self.response_merge_activation.apply(response)
-        response = self.response_transform(response)
-        return response
+        return self.response_merge_activation.apply(response)
 
     @application
     def compute_initial_state(self, x):
@@ -136,7 +134,7 @@ class RecurrentAttentionModel(bricks.BaseRecurrent):
                            x.shape[0], self.cropper.n_spatial_dims)
         scale = T.zeros_like(location)
         patch = self.crop(x, location, scale)
-        u = self.merge(patch, location, scale)
+        u = self.embed_mlp(self.merge(patch, location, scale))
         conditioned_states = self.rnn.apply(as_dict=True, inputs=u, iterate=False, **initial_states)
         return tuple(conditioned_states.values())
 

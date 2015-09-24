@@ -37,36 +37,20 @@ from dump import Dump, DumpMinimum, PrintingTo, load_model_parameters
 floatX = theano.config.floatX
 
 class Ram(object):
-    def __init__(self, image_shape, patch_shape, hidden_dim,
-                 n_spatial_dims, prefork_area_transform,
-                 postmerge_area_transform, patch_transform, batch_normalize,
-                 response_transform, location_std, scale_std, cutoff,
-                 batched_window, initargs, emitter, **kwargs):
+    def __init__(self, hidden_dim, emitter, hyperparameters, **kwargs):
         self.rnn = bricks.RecurrentStack(
             [bricks.LSTM(activation=bricks.Tanh(), dim=hidden_dim),
              bricks.LSTM(activation=bricks.Tanh(), dim=hidden_dim)],
             weights_init=initialization.IsotropicGaussian(1e-4),
             biases_init=initialization.Constant(0))
-
-        self.cropper = crop.LocallySoftRectangularCropper(
-            n_spatial_dims=n_spatial_dims,
-            image_shape=image_shape, patch_shape=patch_shape,
-            kernel=crop.Gaussian(), cutoff=cutoff,
-            batched_window=batched_window)
-        self.emitter = emitter
+        cropper = crop.LocallySoftRectangularCropper(
+            kernel=crop.Gaussian(), **hyperparameters)
         self.model = attention.RecurrentAttentionModel(
-            self.rnn, self.cropper, self.emitter,
+            self.rnn, cropper, emitter,
             # attend based on upper RNN states
             attention_state_name="states#1",
-            n_spatial_dims=n_spatial_dims,
-            location_std=location_std,
-            scale_std=scale_std,
-            prefork_area_transform=prefork_area_transform,
-            patch_transform=patch_transform,
-            postmerge_area_transform=postmerge_area_transform,
-            response_transform=response_transform,
-            batch_normalize=batch_normalize,
-            name="ram")
+            name="ram",
+            hyperparameters=hyperparameters)
 
     def initialize(self):
         self.model.initialize()
@@ -94,7 +78,7 @@ def get_task(task_name, hyperparameters, **kwargs):
 def construct_model(task, patch_shape, initargs, n_channels, n_spatial_dims, hidden_dim,
                     batch_normalize,
                     hyperparameters, patch_cnn_spec=None, patch_mlp_spec=None,
-                    prefork_area_mlp_spec=[], postmerge_area_mlp_spec=[], response_mlp_spec=[],
+                    locate_mlp_spec=[], merge_mlp_spec=[], embed_mlp_spec=[],
                     **kwargs):
     patch_transforms = []
     if patch_cnn_spec:
@@ -117,38 +101,38 @@ def construct_model(task, patch_shape, initargs, n_channels, n_spatial_dims, hid
             initargs=initargs).apply)
     patch_transform = bricks.FeedforwardSequence(patch_transforms, name="ffs")
 
-    prefork_area_transform = masonry.construct_mlp(
-        name="prefork_area_mlp",
+    locate_mlp = masonry.construct_mlp(
+        name="locate_mlp",
         input_dim=hidden_dim,
-        hidden_dims=prefork_area_mlp_spec,
+        hidden_dims=locate_mlp_spec,
         batch_normalize=batch_normalize,
         initargs=initargs)
 
-    postmerge_area_transform = masonry.construct_mlp(
-        name="postmerge_area_mlp",
+    merge_mlp = masonry.construct_mlp(
+        name="merge_mlp",
         input_dim=2*n_spatial_dims,
-        hidden_dims=postmerge_area_mlp_spec,
+        hidden_dims=merge_mlp_spec,
         batch_normalize=batch_normalize,
         initargs=initargs)
 
     # LSTM requires the input to have dim=4*hidden_dim
-    response_mlp_activations = [None for dim in response_mlp_spec[1:]]
-    response_mlp_spec.append(4*hidden_dim)
-    response_mlp_activations.append(bricks.Identity())
+    embed_mlp_activations = [None for dim in embed_mlp_spec[1:]]
+    embed_mlp_spec.append(4*hidden_dim)
+    embed_mlp_activations.append(bricks.Identity())
     response_transform = masonry.construct_mlp(
-        name="response_mlp",
-        hidden_dims=response_mlp_spec[1:],
-        input_dim=response_mlp_spec[0],
+        name="embed_mlp",
+        hidden_dims=embed_mlp_spec[1:],
+        input_dim=embed_mlp_spec[0],
         batch_normalize=batch_normalize,
-        activations=response_mlp_activations,
+        activations=embed_mlp_activations,
         initargs=initargs)
 
     emitter = task.get_emitter(**hyperparameters)
 
     return Ram(patch_transform=patch_transform.apply,
-               prefork_area_transform=prefork_area_transform.apply,
-               postmerge_area_transform=postmerge_area_transform.apply,
-               response_transform=response_transform.apply,
+               locate_mlp=locate_mlp.apply,
+               merge_mlp=merge_mlp.apply,
+               embed_mlp=embed_mlp.apply,
                emitter=emitter,
                **hyperparameters)
 
