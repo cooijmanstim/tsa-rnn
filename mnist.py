@@ -1,4 +1,5 @@
 from fuel.datasets.mnist import MNIST
+import fuel.transformers
 import tasks
 
 class Task(tasks.Classification):
@@ -19,3 +20,12 @@ class Task(tasks.Classification):
         if monitor and which_set == "train":
             return 10000
         return super(Task, self).get_stream_num_examples(which_set, monitor)
+
+    def preprocess(self, data):
+        x, y = data
+        # remove bogus singleton dimension
+        y = y.flatten()
+        x_shape = np.tile([x.shape[2:]], (x.shape[0], 1))
+        return (x.astype(np.float32),
+                x_shape.astype(np.float32),
+                y.astype(np.uint8))

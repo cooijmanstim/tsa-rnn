@@ -10,10 +10,28 @@ from blocks.filter import VariableFilter
 
 from fuel.streams import DataStream
 from fuel.schemes import ShuffledScheme, SequentialScheme
+from fuel import transformers
 
 import emitters
 
 logger = logging.getLogger(__name__)
+
+# have the same sources for all tasks
+CANONICAL_SOURCES = tuple("features shapes targets".split())
+
+class Canonicalize(transformers.Transformer):
+    produces_examples = False
+
+    def __init__(self, stream, mapping, **kwargs):
+        super(Canonicalize, self).__init__(stream, **kwargs)
+        self.mapping = mapping
+
+    @property
+    def sources(self):
+        return CANONICAL_SOURCES
+
+    def transform_batch(self, batch):
+        return self.mapping(batch)
 
 class Classification(object):
     def __init__(self, batch_size, hidden_dim, shrink_dataset_by=1, **kwargs):
@@ -33,31 +51,25 @@ class Classification(object):
         if num_examples is None:
             num_examples = self.get_stream_num_examples(which_set, monitor=monitor)
         scheme = scheme_klass(num_examples, self.batch_size)
-        return DataStream.default_stream(
-            dataset=self.datasets[which_set],
-            iteration_scheme=scheme)
+        return transformers.Mapping(
+            Canonicalize(
+                DataStream.default_stream(
+                    dataset=self.datasets[which_set],
+                    iteration_scheme=scheme),
+                mapping=self.preprocess),
+            mapping=self.center)
 
     def get_variables(self):
+        variables = []
         test_batch = self.get_stream("valid").get_epoch_iterator(as_dict=True).next()
-
-        broadcastable = [False]*test_batch["features"].ndim
-        # shape (batch, channel, [time,] height, width)
-        x = T.TensorType(broadcastable=broadcastable,
-                         dtype=theano.config.floatX)("features")
-        # shape (batch_size, 1)
-        broadcastable = [False]*test_batch["targets"].ndim
-        y = T.TensorType(broadcastable=broadcastable,
-                         dtype="uint8")('targets')
-
-        theano.config.compute_test_value = 'warn'
-        x.tag.test_value = test_batch["features"][:11, ...]
-        y.tag.test_value = test_batch["targets"][:11, ...]
-
-        # remove the singleton from mnist and svhn targets
-        if test_batch["targets"].ndim == 2 and test_batch["targets"].shape[1] == 1:
-            y = y.flatten()
-
-        return x, y
+        for key in CANONICAL_SOURCES:
+            value = test_batch[key]
+            variable = T.TensorType(
+                broadcastable=[False]*value.ndim,
+                dtype=value.dtype)(key)
+            variable.tag.test_value = value[:11]
+            variables.append(variable)
+        return variables
 
     def get_emitter(self, hidden_dim, batch_normalize, **kwargs):
         return emitters.SingleSoftmax(hidden_dim, self.n_classes,
@@ -70,8 +82,17 @@ class Classification(object):
     def plot_channels(self):
         return [["%s_%s" % (which_set, name) for which_set in self.datasets.keys()]
                 for name in "cross_entropy error_rate".split()]
+        
+    def center(self, data):
+        x, x_shape, y = data
+        mean = self.get_mean()
+        masks = np.zeros_like(x)
+        for i, shape in enumerate(x_shape):
+            masks[i, :][tuple(map(slice, shape))] = 1
+        x_centered = x - masks * mean
+        return x_centered, x_shape, y
 
-    def preprocess(self, x):
+    def get_mean(self):
         cache_dir = os.environ["PREPROCESS_CACHE"]
         try:
             os.mkdir(cache_dir)
@@ -84,18 +105,25 @@ class Classification(object):
             mean = data["mean"]
         except IOError:
             print "taking mean"
-            mean = 0
-            n = 0
-            for batch in self.get_stream("train").get_epoch_iterator(as_dict=True):
-                batch_sum = batch["features"].sum(axis=0, keepdims=True)
-                k = batch["features"].shape[0]
-                mean = n/float(n+k) * mean + 1/float(n+k) * batch_sum
-                n += k
-            mean = mean.astype(np.float32)
+            mean = self.compute_mean()
             print "mean taken"
             try:
                 np.savez(cache, mean=mean)
             except IOError, e:
                 logger.error("couldn't save preprocessing cache: %s" % e)
                 import ipdb; ipdb.set_trace()
-        return x - mean
+        return mean
+
+    def compute_mean(self):
+        mean = 0
+        n = 0
+        for batch in self.get_stream("train").get_epoch_iterator(as_dict=True):
+            x, x_shape = batch["features"], batch["shapes"]
+            k = x.shape[0]
+            mean = n/float(n+k) * mean + k/float(n+k) * self.compute_batch_mean(x, x_shape)
+            n += k
+        mean = mean.astype(np.float32)
+        return mean
+
+    def compute_batch_mean(self, x, x_shape):
+        return x.mean(axis=0, keepdims=True)

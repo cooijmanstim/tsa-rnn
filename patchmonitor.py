@@ -32,12 +32,11 @@ class PatchMonitoring(SimpleExtension):
 
     def save_patches(self, filename):
         batch = self.data_stream.get_epoch_iterator(as_dict=True).next()
-        images = batch['features']
-        locationss, scaless, patchess = self.extractor(images)
+        images, image_shapes = batch['features'], batch['shapes']
+        locationss, scaless, patchess = self.extractor(images, image_shapes)
 
         batch_size = images.shape[0]
         npatches = patchess.shape[1]
-        image_shape = images.shape[-2:]
         patch_shape = patchess.shape[-2:]
 
         if images.shape[1] == 1:
@@ -51,9 +50,16 @@ class PatchMonitoring(SimpleExtension):
 
         outer_grid = gridspec.GridSpec(batch_size, 2,
                                        width_ratios=[1, npatches])
-        for i, (image, patches, locations, scales) in enumerate(zip(images, patchess, locationss, scaless)):
+        for i, (image, image_shape, patches, locations, scales) in enumerate(
+                zip(images, image_shapes, patchess, locationss, scaless)):
+            image = image[:][tuple(map(slice, image_shape))]
+
+            # images are not in any predictable range, renormalize but make sure
+            # the patches are normalized in the same way.
+            vmin, vmax = image.min(), image.max()
+
             image_ax = plt.subplot(outer_grid[i, 0])
-            self.imshow(image, axes=image_ax)
+            self.imshow(image, axes=image_ax, vmin=vmin, vmax=vmax)
             image_ax.axis("off")
 
             inner_grid = gridspec.GridSpecFromSubplotSpec(1, npatches,
@@ -66,7 +72,7 @@ class PatchMonitoring(SimpleExtension):
                     np.array(image_shape, dtype='float32'))
 
                 patch_ax = plt.subplot(inner_grid[0, j])
-                self.imshow(patch, axes=patch_ax)
+                self.imshow(patch, axes=patch_ax, vmin=vmin, vmax=vmax)
                 patch_ax.set_title("l (%3.2f, %3.2f)\ns (%3.2f, %3.2f)" %
                                    (location[0], location[1], true_scale[0], true_scale[1]))
                 patch_ax.axis("off")
@@ -111,10 +117,9 @@ class VideoPatchMonitoring(SimpleExtension):
 
     def save_patches(self, filename_stem):
         batch = self.data_stream.get_epoch_iterator(as_dict=True).next()
-        videos = batch['features']
-        locationss, scaless, patchess = self.extractor(videos)
+        videos, video_shapes = batch['features'], batch['shapes']
+        locationss, scaless, patchess = self.extractor(videos, video_shapes)
 
-        video_shape = videos.shape[-3:]
         patch_shape = patchess.shape[-3:]
         n_patches = patchess.shape[1]
 
@@ -128,13 +133,18 @@ class VideoPatchMonitoring(SimpleExtension):
             patchess = np.rollaxis(patchess, 2, patchess.ndim)
 
         outer_grid = gridspec.GridSpec(2, 1)
-        for i, (video, patches, locations, scales) in enumerate(zip(videos, patchess, locationss, scaless)):
+        for i, (video, video_shape, patches, locations, scales) in enumerate(
+                zip(videos, video_shapes, patchess, locationss, scaless)):
+            video = video[:][tuple(map(slice, video_shape))]
+
+            vmin, vmax = video.min(), video.max()
+
             video_ax = plt.subplot(outer_grid[0, 0])
             video_image = (video
                            .transpose(1, 0, 2)
                            .reshape((video.shape[1],
                                      video.shape[0] * video.shape[2])))
-            self.imshow(video_image, axes=video_ax)
+            self.imshow(video_image, axes=video_ax, vmin=vmin, vmax=vmax)
             video_ax.axis("off")
 
             patch_ax = plt.subplot(outer_grid[1, 0])
@@ -142,7 +152,7 @@ class VideoPatchMonitoring(SimpleExtension):
                            .transpose(0, 2, 1, 3)
                            .reshape((patches.shape[0]*patches.shape[2],
                                      patches.shape[1]*patches.shape[3])))
-            self.imshow(patch_image, axes=patch_ax)
+            self.imshow(patch_image, axes=patch_ax, vmin=vmin, vmax=vmax)
             patch_ax.axis("off")
 
             # draw rectangles in video_ax to show patch support

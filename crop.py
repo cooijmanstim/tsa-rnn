@@ -10,9 +10,8 @@ from blocks.bricks import Brick, application
 import util
 
 class LocallySoftRectangularCropper(Brick):
-    def __init__(self, image_shape, patch_shape, kernel, hyperparameters, **kwargs):
+    def __init__(self, patch_shape, kernel, hyperparameters, **kwargs):
         super(LocallySoftRectangularCropper, self).__init__(**kwargs)
-        self.image_shape = T.cast(image_shape, 'int16')
         self.patch_shape = patch_shape
         self.kernel = kernel
         self.cutoff = hyperparameters["cutoff"]
@@ -22,7 +21,6 @@ class LocallySoftRectangularCropper(Brick):
     def compute_crop_matrices(self, locations, scales, Is):
         Ws = []
         for axis in xrange(self.n_spatial_dims):
-            m = T.cast(self.image_shape[axis], 'float32')
             n = T.cast(self.patch_shape[axis], 'float32')
             I = Is[axis].dimshuffle('x', 0, 'x')    # (1, hardcrop_dim, 1)
             J = T.arange(n).dimshuffle('x', 'x', 0) # (1, 1, patch_dim)
@@ -47,7 +45,7 @@ class LocallySoftRectangularCropper(Brick):
             Ws.append(self.kernel.density(dx2, scale))
         return Ws
 
-    def compute_hard_windows(self, location, scale):
+    def compute_hard_windows(self, image_shape, location, scale):
         # find topleft(front) and bottomright(back) corners for each patch
         a = location - 0.5 * (self.patch_shape / scale)
         b = location + 0.5 * (self.patch_shape / scale)
@@ -55,6 +53,10 @@ class LocallySoftRectangularCropper(Brick):
         # grow by three patch pixels
         a -= self.kernel.k_sigma_radius(self.cutoff, scale)
         b += self.kernel.k_sigma_radius(self.cutoff, scale)
+
+        # clip to fit inside image and have nonempty window
+        a = T.clip(a, 0,     image_shape[0] - 1)
+        b = T.clip(b, a + 1, image_shape[1])
 
         if self.batched_window:
             # take the bounding box of all windows; now the slices
@@ -68,20 +70,16 @@ class LocallySoftRectangularCropper(Brick):
         a = T.cast(T.floor(a), 'int16')
         b = T.cast(T.ceil(b), 'int16')
 
-        # clip to fit inside image and have nonempty window
-        a = T.clip(a, 0, self.image_shape - 1)
-        b = T.clip(b, a + 1, self.image_shape)
-
         return a, b
 
-    @application(inputs=['image', 'location', 'scale'], outputs=['patch'])
-    def apply(self, image, location, scale):
-        a, b = self.compute_hard_windows(location, scale)
+    @application(inputs="image image_shape location scale".split(), outputs=['patch'])
+    def apply(self, image, image_shape, location, scale):
+        a, b = self.compute_hard_windows(image_shape, location, scale)
 
         if self.batched_window:
             patch = self.apply_inner(image, location, scale, a[0], b[0])
         else:
-            def map_fn(image, a, b, location, scale):
+            def map_fn(image, image_shape, a, b, location, scale):
                 # apply_inner expects a batch axis
                 image = T.shape_padleft(image)
                 location = T.shape_padleft(location)
@@ -95,7 +93,7 @@ class LocallySoftRectangularCropper(Brick):
             patch, _ = theano.map(map_fn,
                                   sequences=[image, a, b, location, scale])
 
-        savings = (1 - T.cast((b - a).prod(axis=1), floatX) / self.image_shape.prod())
+        savings = (1 - T.cast((b - a).prod(axis=1), floatX) / image_shape.prod(axis=1))
         self.add_auxiliary_variable(savings, name="savings")
 
         return patch
@@ -112,60 +110,6 @@ class LocallySoftRectangularCropper(Brick):
         patch = hardcrop
         for axis, matrix in enumerate(matrices):
             patch = util.batched_tensordot(patch, matrix, [[2], [1]])
-        return patch
-
-class SoftRectangularCropper(Brick):
-    def __init__(self, image_shape, patch_shape, kernel, **kwargs):
-        super(SoftRectangularCropper, self).__init__(**kwargs)
-        self.image_shape = T.cast(image_shape, 'int16')
-        self.patch_shape = patch_shape
-        self.kernel = kernel
-        self.n_spatial_dims = len(patch_shape)
-        self.precompute()
-
-    def precompute(self):
-        # compute most of the stuff that deals with indices outside of
-        # the scan function to avoid gpu/host transfers due to the use
-        # of integers.  basically, if our scan body deals with
-        # integers, the whole scan loop will move onto the cpu.
-        self.ImJns = []
-        for axis in xrange(self.n_spatial_dims):
-            m = T.cast(self.image_shape[axis], 'float32')
-            n = T.cast(self.patch_shape[axis], 'float32')
-            I = T.arange(m).dimshuffle('x', 0, 'x') # (1, image_dim, 1)
-            J = T.arange(n).dimshuffle('x', 'x', 0) # (1, 1, patch_dim)
-            self.ImJns.append((I, m, J, n))
-
-    def compute_crop_matrices(self, locations, scales):
-        Ws = []
-        for axis, (I, m, J, n) in enumerate(self.ImJns):
-            location = locations[:, axis].dimshuffle(0, 'x', 'x')   # (batch_size, 1, 1)
-            scale    = scales   [:, axis].dimshuffle(0, 'x', 'x')   # (batch_size, 1, 1)
-
-            # map patch index into image index space
-            J = (J - 0.5*n) / scale + location                      # (batch_size, 1, patch_dim)
-
-            # compute squared distances between image index and patch
-            # index in the current dimension:
-            #   dx**2 = (i - j)*(i - j)
-            #               where i is image index
-            #                     j is patch index mapped into image space
-            #         = i**2 + j**2 -2ij
-            #         = I**2 + J**2 -2IJ'  for all i,j in one swoop
-
-            IJ = I * J                # (batch_size, image_dim, patch_dim)
-            dx2 = I**2 + J**2 - 2*IJ  # (batch_size, image_dim, patch_dim)
-
-            Ws.append(self.kernel.density(dx2, scale))
-        return Ws
-
-    @application(inputs=['image', 'location', 'scale'], outputs=['patch'])
-    def apply(self, image, location, scale):
-        matrices = self.compute_crop_matrices(location, scale)
-        patch = image
-        for axis, matrix in enumerate(matrices):
-            patch = util.batched_tensordot(patch, matrix, [[2], [1]])
-        self.add_auxiliary_variable(T.constant(0.), name="mean_savings")
         return patch
 
 class Gaussian(object):

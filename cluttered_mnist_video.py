@@ -12,13 +12,6 @@ class ClutteredMNISTVideo(H5PYDataset):
             "/data/lisatmp3/cooijmat/datasets/cluttered-mnist-video/cluttered-mnist-video.hdf5",
             which_sets, **kwargs)
 
-def mapping(data):
-    x, y = data
-    # move channel just after batch axis
-    x = np.rollaxis(x, x.ndim - 1, 1)
-    x = x.astype(np.float32) / 255
-    return x, y
-
 class Task(tasks.Classification):
     name = "cluttered_mnist_video"
 
@@ -38,6 +31,12 @@ class Task(tasks.Classification):
             return 10000
         return super(Task, self).get_stream_num_examples(which_set, monitor)
 
-    def get_stream(self, *args, **kwargs):
-        return Mapping(super(Task, self).get_stream(*args, **kwargs),
-                       mapping=mapping)
+    def preprocess(data):
+        x, y = data
+        # move channel just after batch axis
+        x = np.rollaxis(x, x.ndim - 1, 1)
+        x = np.float32(x) / 255.0
+        x_shape = np.tile([x.shape[2:]], (x.shape[0], 1))
+        return (x.astype(np.float32),
+                x_shape.astype(np.float32),
+                y.astype(np.uint8))

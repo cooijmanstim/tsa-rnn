@@ -43,12 +43,11 @@ def get_task(task_name, hyperparameters, **kwargs):
                  svhn_number=goodfellow_svhn.NumberTask)[task_name]
     return klass(**hyperparameters)
 
-def construct_model(image_shape, patch_shape, hidden_dim, task,
+def construct_model(patch_shape, hidden_dim, task,
                     hyperparameters, **kwargs):
     cropper = crop.LocallySoftRectangularCropper(
         name="cropper", kernel=crop.Gaussian(),
-        image_shape=image_shape, patch_shape=patch_shape,
-        hyperparameters=hyperparameters)
+        patch_shape=patch_shape, hyperparameters=hyperparameters)
     emitter = task.get_emitter(**hyperparameters)
     return attention.RecurrentAttentionModel(
         hidden_dim=hidden_dim, cropper=cropper, emitter=emitter,
@@ -64,7 +63,7 @@ def construct_model(image_shape, patch_shape, hidden_dim, task,
         weights_init=initialization.IsotropicGaussian(std=1e-3),
         biases_init=initialization.Constant(0))
 
-def construct_monitors(algorithm, task, n_patches, x, x_uncentered, hs, 
+def construct_monitors(algorithm, task, n_patches, x, x_shape, hs, 
                        graph, name, ram, model, cost,
                        n_spatial_dims, plot_url, patchmonitor_interval=100, **kwargs):
     location, scale, savings = util.get_recurrent_auxiliaries(
@@ -123,11 +122,12 @@ def construct_monitors(algorithm, task, n_patches, x, x_uncentered, hs,
         patchmonitor_klass = VideoPatchMonitoring
 
     if patchmonitor_klass:
-        # get patches from original (uncentered) images
-        patch = T.stack(*[ram.crop(x_uncentered, location[:, i, :], scale[:, i, :])
-                          for i in xrange(n_patches)])
+        patch = T.stack(*[
+            ram.crop(x, x_shape, location[:, i, :], scale[:, i, :])
+            for i in xrange(n_patches)])
         patch = patch.dimshuffle(1, 0, *range(2, patch.ndim))
-        patch_extractor = theano.function([x_uncentered], [location, scale, patch])
+        patch_extractor = theano.function([x, x_shape],
+                                          [location, scale, patch])
 
         for which in "train valid".split():
             patchmonitor = patchmonitor_klass(
@@ -160,21 +160,18 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
     task = get_task(**hyperparameters)
     hyperparameters["n_channels"] = task.n_channels
 
-    x_uncentered, y = task.get_variables()
+    theano.config.compute_test_value = "warn"
 
-    x = task.preprocess(x_uncentered)
-
-    # this is a theano variable; it may depend on the batch
-    hyperparameters["image_shape"] = x.shape[-n_spatial_dims:]
+    x, x_shape, y = task.get_variables()
 
     ram = construct_model(task=task, **hyperparameters)
     ram.initialize()
 
     states = []
-    states.append(ram.compute_initial_state(x, as_dict=True))
+    states.append(ram.compute_initial_state(x, x_shape, as_dict=True))
     n_steps = n_patches - 1
     for i in xrange(n_steps):
-        states.append(ram.apply(x=x, as_dict=True, **states[-1]))
+        states.append(ram.apply(x, x_shape, as_dict=True, **states[-1]))
     hs = T.concatenate([state["states"][:, np.newaxis, :]
                         for state in states],
                        axis=1)
@@ -189,9 +186,9 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
                                 parameters=graph.parameters,
                                 step_rule=Adam(learning_rate=learning_rate))
     monitors = construct_monitors(
-        x=x, x_uncentered=x_uncentered, y=y, hs=hs, cost=cost,
-        algorithm=algorithm, task=task, model=uselessflunky,
-        ram=ram, graph=graph, **hyperparameters)
+        x=x, x_shape=x_shape, y=y, hs=hs, cost=cost,
+        algorithm=algorithm, task=task, model=uselessflunky, ram=ram,
+        graph=graph, **hyperparameters)
     main_loop = MainLoop(data_stream=task.get_stream("train"),
                          algorithm=algorithm,
                          extensions=(monitors +

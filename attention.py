@@ -60,7 +60,7 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
         self.compute_initial_state.outputs = self.rnn.apply.outputs
 
     def construct_merger(self, n_spatial_dims, n_channels, patch_shape,
-                         response_dim,
+                         response_dim, initargs,
                          patch_cnn_spec, patch_mlp_spec,
                          merge_mlp_spec, response_mlp_spec,
                          batch_normalize, **kwargs):
@@ -82,6 +82,7 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
                 name="patch_mlp",
                 hidden_dims=patch_mlp_spec,
                 input_dim=patch_transforms[-1].output_dim,
+                initargs=initargs,
                 batch_normalize=batch_normalize))
         self.patch_transform = bricks.FeedforwardSequence(
             [brick.apply for brick in patch_transforms], name="ffs")
@@ -91,6 +92,7 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
             name="merge_mlp",
             input_dim=2*n_spatial_dims,
             hidden_dims=merge_mlp_spec,
+            initargs=initargs,
             batch_normalize=batch_normalize)
 
         # construct what-where merger network
@@ -110,6 +112,7 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
             name="response_mlp",
             hidden_dims=response_mlp_spec,
             input_dim=response_dim,
+            initargs=initargs,
             batch_normalize=batch_normalize)
 
         self.children.extend([
@@ -121,18 +124,20 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
 
     def construct_locator(self, locate_mlp_spec, n_spatial_dims,
                           location_std, scale_std, batch_normalize,
-                          **kwargs):
+                          initargs, **kwargs):
         self.n_spatial_dims = n_spatial_dims
 
         self.locate_mlp = masonry.construct_mlp(
             name="locate_mlp",
             input_dim=self.get_dim(self.attention_state_name),
             hidden_dims=locate_mlp_spec,
+            initargs=initargs,
             batch_normalize=batch_normalize)
         self.theta_from_area = bricks.Linear(
             input_dim=self.locate_mlp.output_dim,
             output_dim=2*n_spatial_dims,
-            name="theta_from_area")
+            name="theta_from_area",
+            **initargs)
 
         self.T_rng = theano.sandbox.rng_mrg.MRG_RandomStreams(12345)
         self.location_std = location_std
@@ -154,9 +159,9 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
             initialization.Identity().initialize(rnn.W_state, rnn.rng)
 
     @application
-    def apply(self, x, **states):
+    def apply(self, x, x_shape, **states):
         location, scale = self.locate(states[self.attention_state_name])
-        patch = self.crop(x, location, scale)
+        patch = self.crop(x, x_shape, location, scale)
         u = self.embedder.apply(self.merge(patch, location, scale))
         states = self.rnn.apply(inputs=u, iterate=False, as_dict=True, **states)
         return tuple(states.values())
@@ -182,20 +187,21 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
         return self.response_mlp.apply(response)
 
     @application
-    def compute_initial_state(self, x):
-        initial_states = self.rnn.initial_states(x.shape[0], as_dict=True)
+    def compute_initial_state(self, x, x_shape):
+        batch_size = x_shape.shape[0]
+        initial_states = self.rnn.initial_states(batch_size, as_dict=True)
         # condition on initial shrink-to-fit patch
         location = T.alloc(T.cast(0.0, floatX),
-                           x.shape[0], self.cropper.n_spatial_dims)
+                           batch_size, self.cropper.n_spatial_dims)
         scale = T.zeros_like(location)
-        patch = self.crop(x, location, scale)
+        patch = self.crop(x, x_shape, location, scale)
         u = self.embedder.apply(self.merge(patch, location, scale))
         conditioned_states = self.rnn.apply(as_dict=True, inputs=u, iterate=False, **initial_states)
         return tuple(conditioned_states.values())
 
-    def crop(self, x, location, scale):
-        true_location, true_scale = self.map_to_input_space(location, scale)
-        patch = self.cropper.apply(x, true_location, true_scale)
+    def crop(self, x, x_shape, location, scale):
+        true_location, true_scale = self.map_to_input_space(x_shape, location, scale)
+        patch = self.cropper.apply(x, x_shape, true_location, true_scale)
         self.add_auxiliary_variable(location, name="location")
         self.add_auxiliary_variable(scale, name="scale")
         self.add_auxiliary_variable(true_location, name="true_location")
@@ -203,8 +209,8 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
         self.add_auxiliary_variable(patch, name="patch")
         return patch
 
-    def map_to_input_space(self, location, scale):
+    def map_to_input_space(self, image_shape, location, scale):
         return static_map_to_input_space(
             location, scale,
             T.cast(self.cropper.patch_shape, floatX),
-            T.cast(self.cropper.image_shape, floatX))
+            T.cast(image_shape, floatX))

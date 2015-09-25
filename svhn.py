@@ -2,12 +2,6 @@ from fuel.transformers import Mapping
 from fuel.datasets.svhn import SVHN
 import tasks
 
-def fix_target_representation(data):
-    x, y = data
-    # use zero to represent zero
-    y[y == 10] = 0
-    return x, y
-
 class DigitTask(tasks.Classification):
     name = "svhn_digit"
 
@@ -30,3 +24,13 @@ class DigitTask(tasks.Classification):
     def get_stream(self, *args, **kwargs):
         return Mapping(super(DigitTask, self).get_stream(*args, **kwargs),
                        mapping=fix_target_representation)
+
+    def preprocess(self, data):
+        x, y = data
+        # remove bogus singleton dimension
+        y = y.flatten()
+        y[y == 10] = 0
+        x_shape = np.tile([x.shape[2:]], (x.shape[0], 1))
+        return (x.astype(np.float32),
+                x_shape.astype(np.float32),
+                y.astype(np.uint8))
