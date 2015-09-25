@@ -46,18 +46,19 @@ class Classification(object):
         return (self.datasets[which_set].num_examples
                 / self.shrink_dataset_by)
 
-    def get_stream(self, which_set, shuffle=True, monitor=False, num_examples=None):
+    def get_stream(self, which_set, shuffle=True, monitor=False, num_examples=None, center=True):
         scheme_klass = ShuffledScheme if shuffle else SequentialScheme
         if num_examples is None:
             num_examples = self.get_stream_num_examples(which_set, monitor=monitor)
         scheme = scheme_klass(num_examples, self.batch_size)
-        return transformers.Mapping(
-            Canonicalize(
-                DataStream.default_stream(
-                    dataset=self.datasets[which_set],
-                    iteration_scheme=scheme),
-                mapping=self.preprocess),
-            mapping=self.center)
+        stream = Canonicalize(
+            DataStream.default_stream(
+                dataset=self.datasets[which_set],
+                iteration_scheme=scheme),
+            mapping=self.preprocess)
+        if center:
+            stream = transformers.Mapping(stream, mapping=self.center)
+        return stream
 
     def get_variables(self):
         variables = []
@@ -117,10 +118,12 @@ class Classification(object):
     def compute_mean(self):
         mean = 0
         n = 0
-        for batch in self.get_stream("train").get_epoch_iterator(as_dict=True):
+        for batch in (self.get_stream("train", center=False)
+                      .get_epoch_iterator(as_dict=True)):
             x, x_shape = batch["features"], batch["shapes"]
             k = x.shape[0]
-            mean = n/float(n+k) * mean + k/float(n+k) * self.compute_batch_mean(x, x_shape)
+            mean = (n/float(n+k) * mean +
+                    k/float(n+k) * self.compute_batch_mean(x, x_shape))
             n += k
         mean = mean.astype(np.float32)
         return mean
