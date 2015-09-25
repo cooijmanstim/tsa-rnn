@@ -79,9 +79,11 @@ def construct_cnn(name, layer_specs, n_channels, input_shape, batch_normalize):
     cnn.initialize()
     return cnn
 
-def construct_mlp(name, hidden_dims, input_dim, initargs, batch_normalize, activations=None):
+def construct_mlp(name, hidden_dims, input_dim, batch_normalize, initargs=None, activations=None):
     if not hidden_dims:
         return bricks.FeedforwardIdentity(dim=input_dim)
+
+    initargs = initargs or dict()
 
     if not activations:
         activations = [bricks.Rectifier() for dim in hidden_dims]

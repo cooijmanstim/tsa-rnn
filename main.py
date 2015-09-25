@@ -43,78 +43,19 @@ def get_task(task_name, hyperparameters, **kwargs):
                  svhn_number=goodfellow_svhn.NumberTask)[task_name]
     return klass(**hyperparameters)
 
-def construct_model(task, image_shape, patch_shape, initargs,
-                    n_channels, n_spatial_dims, hidden_dim,
-                    response_dim, batch_normalize, hyperparameters,
-                    patch_cnn_spec=None, patch_mlp_spec=None,
-                    locate_mlp_spec=[], merge_mlp_spec=[],
-                    response_mlp_spec=[], **kwargs):
-    patch_transforms = []
-    if patch_cnn_spec:
-        patch_transforms.append(masonry.construct_cnn(
-            name="patch_cnn",
-            layer_specs=patch_cnn_spec,
-            input_shape=patch_shape,
-            n_channels=n_channels,
-            batch_normalize=batch_normalize).apply)
-        shape = patch_transforms[-1].brick.get_dim("output")
-    else:
-        shape = (n_channels,) + tuple(patch_shape)
-    patch_transforms.append(bricks.FeedforwardFlattener(input_shape=shape).apply)
-    if patch_mlp_spec:
-        patch_transforms.append(masonry.construct_mlp(
-            name="patch_mlp",
-            hidden_dims=patch_mlp_spec,
-            input_dim=patch_transforms[-1].brick.output_dim,
-            batch_normalize=batch_normalize,
-            initargs=initargs).apply)
-    patch_transform = bricks.FeedforwardSequence(patch_transforms, name="ffs")
-
-    locate_mlp = masonry.construct_mlp(
-        name="locate_mlp",
-        input_dim=hidden_dim,
-        hidden_dims=locate_mlp_spec,
-        batch_normalize=batch_normalize,
-        initargs=initargs)
-
-    merge_mlp = masonry.construct_mlp(
-        name="merge_mlp",
-        input_dim=2*n_spatial_dims,
-        hidden_dims=merge_mlp_spec,
-        batch_normalize=batch_normalize,
-        initargs=initargs)
-
-    response_mlp = masonry.construct_mlp(
-        name="response_mlp",
-        hidden_dims=response_mlp_spec,
-        input_dim=response_dim,
-        batch_normalize=batch_normalize,
-        initargs=initargs)
-
+def construct_model(image_shape, patch_shape, hidden_dim, task,
+                    hyperparameters, **kwargs):
     cropper = crop.LocallySoftRectangularCropper(
         name="cropper", kernel=crop.Gaussian(),
         image_shape=image_shape, patch_shape=patch_shape,
         hyperparameters=hyperparameters)
-    
-    embedder = bricks.Linear(input_dim=response_mlp.output_dim,
-                             output_dim=4*hidden_dim,
-                             use_bias=True)
-
-    rnn = bricks.RecurrentStack(
-        [bricks.LSTM(activation=bricks.Tanh(), dim=hidden_dim),
-         bricks.LSTM(activation=bricks.Tanh(), dim=hidden_dim)])
-
     emitter = task.get_emitter(**hyperparameters)
-    
-    model = attention.RecurrentAttentionModel(
-        rnn=rnn, cropper=cropper, embedder=embedder, emitter=emitter,
-        hooks=dict(locate_mlp=locate_mlp,
-                   merge_mlp=merge_mlp,
-                   response_mlp=response_mlp,
-                   patch_transform=patch_transform),
+    return attention.RecurrentAttentionModel(
+        hidden_dim=hidden_dim, cropper=cropper, emitter=emitter,
+        hyperparameters=hyperparameters,
         # attend based on upper RNN states
         attention_state_name="states#1",
-        name="ram", hyperparameters=hyperparameters,
+        name="ram",
         # blocks' push_initialization_config stinks; it overwrites everything
         # that comes in its way, leaving us with no good way to specialize
         # initialization for e.g. convolution layers deep inside the model.
@@ -122,8 +63,6 @@ def construct_model(task, image_shape, patch_shape, initargs,
         # situation.
         weights_init=initialization.IsotropicGaussian(std=1e-3),
         biases_init=initialization.Constant(0))
-
-    return model
 
 def construct_monitors(algorithm, task, n_patches, x, x_uncentered, hs, 
                        graph, name, ram, model, cost,
