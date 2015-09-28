@@ -96,6 +96,8 @@ def construct_mlp(name, hidden_dims, input_dim, batch_normalize, initargs=None, 
         bricks.NormalizedActivation(
             shape=[hidden_dim],
             name="activation_%i" % i,
+            # biases are handled by our activation function
+            use_bias=False,
             batch_normalize=batch_normalize,
             activation=activation)
         for i, (hidden_dim, activation)
@@ -104,7 +106,4 @@ def construct_mlp(name, hidden_dims, input_dim, batch_normalize, initargs=None, 
                      activations=wrapped_activations,
                      dims=dims,
                      **initargs)
-    # biases are handled by our activation function
-    for layer in mlp.linear_transformations:
-        layer.use_bias = False
     return mlp
