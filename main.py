@@ -9,7 +9,7 @@ import theano.tensor as T
 import theano.sandbox.rng_mrg
 
 from blocks.model import Model
-from blocks.algorithms import GradientDescent, RMSProp, Adam
+from blocks.algorithms import GradientDescent, RMSProp, Adam, CompositeRule, StepClipping
 from blocks.extensions.monitoring import TrainingDataMonitoring, DataStreamMonitoring
 from blocks.extensions.saveload import Checkpoint
 from blocks.main_loop import MainLoop
@@ -17,6 +17,7 @@ from blocks.extensions import FinishAfter, Printing, ProgressBar, Timing
 from blocks.roles import OUTPUT
 from blocks.graph import ComputationGraph
 from blocks.filter import VariableFilter
+from blocks.theano_expressions import l2_norm
 
 import bricks
 import initialization
@@ -86,11 +87,14 @@ def construct_monitors(algorithm, task, n_patches, x, x_shape, hs,
         channels.append(variable.var(axis=1).mean(),
                         "%s.time_variance" % variable_name)
 
-    #step_norms = util.Channels()
-    #step_norms.extend(util.named(l2_norm([algorithm.steps[param]]),
-    #                             "%s.step_norm" % name)
-    #                  for name, param in model.get_parameter_dict().items())
-    #step_channels = step_norms.get_channels()
+    channels.append(algorithm.total_gradient_norm,
+                    "total_gradient_norm")
+
+    step_norms = util.Channels()
+    step_norms.extend(util.named(l2_norm([algorithm.steps[param]]),
+                                 "%s.step_norm" % name)
+                      for name, param in model.get_parameter_dict().items())
+    step_channels = step_norms.get_channels()
 
     #for activation in VariableFilter(roles=[OUTPUT])(graph.variables):
     #    quantity = activation.mean()
@@ -106,9 +110,8 @@ def construct_monitors(algorithm, task, n_patches, x, x_shape, hs,
 
     extensions = []
 
-    #extensions.append(TrainingDataMonitoring(
-    #    step_channels,
-    #    prefix="train", after_epoch=True))
+    extensions.append(TrainingDataMonitoring(
+        step_channels, prefix="train", after_epoch=True))
 
     extensions.append(DataStreamMonitoring(data_independent_channels.get_channels(),
                                            data_stream=None, after_epoch=True))
@@ -184,9 +187,11 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
     print "setting up main loop..."
     graph = ComputationGraph(cost)
     uselessflunky = Model(cost)
-    algorithm = GradientDescent(cost=cost,
-                                parameters=graph.parameters,
-                                step_rule=Adam(learning_rate=learning_rate))
+    algorithm = GradientDescent(
+        cost=cost,
+        parameters=graph.parameters,
+        step_rule=CompositeRule([StepClipping(1.),
+                                 Adam(learning_rate=learning_rate)]))
     monitors = construct_monitors(
         x=x, x_shape=x_shape, y=y, hs=hs, cost=cost,
         algorithm=algorithm, task=task, model=uselessflunky, ram=ram,
