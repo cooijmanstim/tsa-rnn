@@ -50,11 +50,6 @@ class Task(tasks.Classification):
         return dict((which_set, JpegHDF5Dataset(which_set=which_set))
                     for which_set in "train valid test".split())
 
-    def get_stream_num_examples(self, which_set, monitor):
-        if monitor and which_set == "train":
-            return 10000
-        return super(Task, self).get_stream_num_examples(which_set, monitor)
-
     def compute_batch_mean(self, x, x_shape):
         # average over time first
         time = 2
