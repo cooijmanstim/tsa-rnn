@@ -31,16 +31,8 @@ class LocallySoftRectangularCropper(Brick):
             # map patch index into image index space
             J = (J - 0.5*n) / scale + location                      # (batch_size, 1, patch_dim)
 
-            # compute squared distances between image index and patch
-            # index in the current dimension:
-            #   dx**2 = (i - j)*(i - j)
-            #               where i is image index
-            #                     j is patch index mapped into image space
-            #         = i**2 + j**2 -2ij
-            #         = I**2 + J**2 -2IJ'  for all i,j in one swoop
-
-            IJ = I * J                # (batch_size, hardcrop_dim, patch_dim)
-            dx2 = I**2 + J**2 - 2*IJ  # (batch_size, hardcrop_dim, patch_dim)
+            # compute squared pairwise distances
+            dx2 = (I - J)**2 # (batch_size, hardcrop_dim, patch_dim)
 
             Ws.append(self.kernel.density(dx2, scale))
         return Ws
