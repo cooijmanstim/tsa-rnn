@@ -49,6 +49,7 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
         self.construct_merger(**hyperparameters)
 
         self.embedder = bricks.Linear(
+            name="embedder",
             input_dim=self.response_mlp.output_dim,
             output_dim=4*self.rnn.get_dim("states"),
             use_bias=True)
