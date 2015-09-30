@@ -77,6 +77,8 @@ def construct_monitors(algorithm, task, n_patches, x, x_shape,
 
     for variable_name in "location scale".split():
         variable = locals()[variable_name]
+        channels.append(variable.mean(),
+                        "%s.mean" % variable_name)
         channels.append(variable.var(axis=0).mean(),
                         "%s.batch_variance" % variable_name)
         channels.append(variable.var(axis=1).mean(),
