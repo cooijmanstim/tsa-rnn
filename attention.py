@@ -64,7 +64,7 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
                          response_dim, initargs,
                          patch_cnn_spec, patch_mlp_spec,
                          merge_mlp_spec, response_mlp_spec,
-                         batch_normalize, **kwargs):
+                         batch_normalize, batch_normalize_patch, **kwargs):
         # construct patch interpretation network
         patch_transforms = []
         if patch_cnn_spec:
@@ -73,7 +73,7 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
                 layer_specs=patch_cnn_spec,
                 input_shape=patch_shape,
                 n_channels=n_channels,
-                batch_normalize=batch_normalize))
+                batch_normalize=batch_normalize_patch))
             shape = patch_transforms[-1].get_dim("output")
         else:
             shape = (n_channels,) + tuple(patch_shape)
@@ -84,7 +84,7 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
                 hidden_dims=patch_mlp_spec,
                 input_dim=patch_transforms[-1].output_dim,
                 initargs=initargs,
-                batch_normalize=batch_normalize))
+                batch_normalize=batch_normalize_patch))
         self.patch_transform = bricks.FeedforwardSequence(
             [brick.apply for brick in patch_transforms], name="ffs")
 

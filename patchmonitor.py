@@ -52,7 +52,7 @@ class PatchMonitoring(SimpleExtension):
                                        width_ratios=[1, npatches])
         for i, (image, image_shape, patches, locations, scales) in enumerate(
                 zip(images, image_shapes, patchess, locationss, scaless)):
-            image = image[:][tuple(map(slice, image_shape))]
+            image = image[tuple(map(slice, image_shape))]
 
             # images are not in any predictable range, renormalize but make sure
             # the patches are normalized in the same way.
