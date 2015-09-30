@@ -72,8 +72,8 @@ class Classification(object):
             variables.append(variable)
         return variables
 
-    def get_emitter(self, hidden_dim, batch_normalize, **kwargs):
-        return emitters.SingleSoftmax(hidden_dim, self.n_classes,
+    def get_emitter(self, input_dim, batch_normalize, **kwargs):
+        return emitters.SingleSoftmax(input_dim, self.n_classes,
                                       batch_normalize=batch_normalize)
 
     def monitor_channels(self, graph):

@@ -32,19 +32,18 @@ def static_map_to_input_space(location, scale, patch_shape, image_shape):
     return location, scale
 
 class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
-    def __init__(self, hidden_dim, cropper, emitter,
+    def __init__(self, hidden_dim, cropper,
                  attention_state_name, hyperparameters, **kwargs):
         super(RecurrentAttentionModel, self).__init__(**kwargs)
 
         self.rnn = bricks.RecurrentStack(
             [bricks.LSTM(activation=bricks.Tanh(), dim=hidden_dim),
-            bricks.LSTM(activation=bricks.Tanh(), dim=hidden_dim)])
+             bricks.LSTM(activation=bricks.Tanh(), dim=hidden_dim)])
 
         # name of the RNN state that determines the parameters of the next glimpse
         self.attention_state_name = attention_state_name
 
         self.cropper = cropper
-        self.emitter = emitter
         self.construct_locator(**hyperparameters)
         self.construct_merger(**hyperparameters)
 
@@ -54,7 +53,7 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
             output_dim=4*self.rnn.get_dim("states"),
             use_bias=True)
 
-        self.children.extend([self.rnn, self.cropper, self.embedder, self.emitter])
+        self.children.extend([self.rnn, self.cropper, self.embedder])
 
         # states aren't known until now
         self.apply.outputs = self.rnn.apply.outputs

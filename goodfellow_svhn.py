@@ -26,18 +26,18 @@ class SVHN(H5PYDataset):
             **kwargs)
 
 class Emitter(bricks.Initializable):
-    def __init__(self, hidden_dim, n_classes, batch_normalize, **kwargs):
+    def __init__(self, input_dim, n_classes, batch_normalize, **kwargs):
         super(Emitter, self).__init__(**kwargs)
 
-        self.hidden_dim = hidden_dim
+        self.input_dim = input_dim
         self.n_classes = n_classes
 
         # TODO: use TensorLinear or some such
         self.emitters = [
             masonry.construct_mlp(
                 activations=[None, bricks.Identity()],
-                input_dim=hidden_dim,
-                hidden_dims=[hidden_dim/2, n],
+                input_dim=input_dim,
+                hidden_dims=[input_dim/2, n],
                 name="mlp_%i" % i,
                 batch_normalize=batch_normalize,
                 initargs=dict(weights_init=initialization.Orthogonal(),
@@ -47,10 +47,8 @@ class Emitter(bricks.Initializable):
 
         self.children = self.emitters + [self.softmax]
 
-    # some day: @application(...) def feedback(self, h)
-
-    @application(inputs=['cs', 'y'], outputs=['cost'])
-    def cost(self, cs, y, n_patches):
+    @application(inputs=['x', 'y'], outputs=['cost'])
+    def cost(self, x, y, n_patches):
         max_length = len(self.n_classes) - 1
         _length_masks = theano.shared(
             np.tril(np.ones((max_length, max_length), dtype='int8')),
@@ -84,19 +82,15 @@ class Emitter(bricks.Initializable):
                              * (length_masks[:, i] if i < max_length else 1)
                              for i, logprob in enumerate(logprobs)]).any(axis=0).mean()
 
-        mean_cross_entropies = []
-        error_rates = []
-        for t in xrange(n_patches):
-            logprobs = [self.softmax.log_probabilities(emitter.apply(cs[:, t, :]))
-                        for emitter in self.emitters]
-            mean_cross_entropies.append(compute_mean_cross_entropy(y, logprobs))
-            error_rates.append(compute_error_rate(y, logprobs))
+        logprobs = [self.softmax.log_probabilities(emitter.apply(x))
+                    for emitter in self.emitters]
+        mean_cross_entropy = compute_mean_cross_entropy(y, logprobs)
+        mean_error_rate = compute_error_rate(y, logprobs)
 
-        self.add_auxiliary_variable(mean_cross_entropies[-1], name="cross_entropy")
-        self.add_auxiliary_variable(error_rates[-1], name="error_rate")
+        self.add_auxiliary_variable(mean_cross_entropy, name="cross_entropy")
+        self.add_auxiliary_variable(error_rate, name="error_rate")
 
-        # minimize the mean cross entropy over time and over batch
-        cost = mean_cross_entropies[-1]
+        cost = mean_cross_entropy
         return cost
 
 class NumberTask(tasks.Classification):
@@ -119,8 +113,8 @@ class NumberTask(tasks.Classification):
             return 10000
         return super(NumberTask, self).get_stream_num_examples(which_set, monitor)
 
-    def get_emitter(self, hidden_dim, batch_normalize, **kwargs):
-        return Emitter(hidden_dim, self.n_classes,
+    def get_emitter(self, input_dim, batch_normalize, **kwargs):
+        return Emitter(input_dim, self.n_classes,
                        batch_normalize=batch_normalize)
 
     def monitor_channels(self, graph):

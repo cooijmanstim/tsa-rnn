@@ -46,14 +46,12 @@ def get_task(task_name, hyperparameters, **kwargs):
                  svhn_number=goodfellow_svhn.NumberTask)[task_name]
     return klass(**hyperparameters)
 
-def construct_model(patch_shape, hidden_dim, task,
-                    hyperparameters, **kwargs):
+def construct_model(patch_shape, hidden_dim, hyperparameters, **kwargs):
     cropper = crop.LocallySoftRectangularCropper(
         name="cropper", kernel=crop.Gaussian(),
         patch_shape=patch_shape, hyperparameters=hyperparameters)
-    emitter = task.get_emitter(**hyperparameters)
     return attention.RecurrentAttentionModel(
-        hidden_dim=hidden_dim, cropper=cropper, emitter=emitter,
+        hidden_dim=hidden_dim, cropper=cropper,
         hyperparameters=hyperparameters,
         # attend based on upper RNN states
         attention_state_name="states#1",
@@ -66,7 +64,7 @@ def construct_model(patch_shape, hidden_dim, task,
         weights_init=initialization.IsotropicGaussian(std=1e-3),
         biases_init=initialization.Constant(0))
 
-def construct_monitors(algorithm, task, n_patches, x, x_shape, hs, 
+def construct_monitors(algorithm, task, n_patches, x, x_shape,
                        graph, name, ram, model, cost,
                        n_spatial_dims, plot_url, patchmonitor_interval=100, **kwargs):
     location, scale, savings = util.get_recurrent_auxiliaries(
@@ -74,9 +72,6 @@ def construct_monitors(algorithm, task, n_patches, x, x_shape, hs,
 
     channels = util.Channels()
     channels.extend(task.monitor_channels(graph))
-
-    #for i in xrange(n_patches):
-    #    channels.append(hs[:, i].mean(), "h%i.mean" % i)
 
     channels.append(util.named(savings.mean(), "savings.mean"))
 
@@ -177,11 +172,12 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
     n_steps = n_patches - 1
     for i in xrange(n_steps):
         states.append(ram.apply(x, x_shape, as_dict=True, **states[-1]))
-    hs = T.concatenate([state["states"][:, np.newaxis, :]
-                        for state in states],
-                       axis=1)
 
-    cost = ram.emitter.cost(hs, y, n_patches)
+    emitter = task.get_emitter(
+        input_dim=ram.get_dim("states"),
+        **hyperparameters)
+    emitter.initialize()
+    cost = emitter.cost(states[-1]["states"], y, n_patches)
     cost.name = "cost"
 
     print "setting up main loop..."
@@ -193,7 +189,7 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
         step_rule=CompositeRule([StepClipping(1.),
                                  Adam(learning_rate=learning_rate)]))
     monitors = construct_monitors(
-        x=x, x_shape=x_shape, y=y, hs=hs, cost=cost,
+        x=x, x_shape=x_shape, y=y, cost=cost,
         algorithm=algorithm, task=task, model=uselessflunky, ram=ram,
         graph=graph, **hyperparameters)
     main_loop = MainLoop(data_stream=task.get_stream("train"),
