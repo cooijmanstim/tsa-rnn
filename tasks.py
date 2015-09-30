@@ -89,7 +89,7 @@ class Classification(object):
         mean = self.get_mean()
         masks = np.zeros_like(x)
         for i, shape in enumerate(x_shape):
-            masks[i, :][tuple(map(slice, shape))] = 1
+            masks[np.index_exp[i, :] + tuple(map(slice, shape))] = 1
         x_centered = x - masks * mean
         return x_centered, x_shape, y
 

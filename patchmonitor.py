@@ -135,7 +135,7 @@ class VideoPatchMonitoring(SimpleExtension):
         outer_grid = gridspec.GridSpec(2, 1)
         for i, (video, video_shape, patches, locations, scales) in enumerate(
                 zip(videos, video_shapes, patchess, locationss, scaless)):
-            video = video[:][tuple(map(slice, video_shape))]
+            video = video[tuple(map(slice, video_shape))]
 
             vmin, vmax = video.min(), video.max()
 
