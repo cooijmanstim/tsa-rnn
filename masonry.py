@@ -29,12 +29,14 @@ def construct_cnn_layer(name, layer_spec, conv_module, ndim, batch_normalize):
         layer = conv_module.ConvolutionalActivation(
             name=name,
             activation=activation.apply,
-            # our activation function will handle the bias
-            use_bias=False,
             filter_size=tuple(layer_spec.pop("size", (1,) * ndim)),
             step=tuple(layer_spec.pop("step", (1,) * ndim)),
             num_filters=layer_spec.pop("num_filters", 1),
-            border_mode=border_mode)
+            border_mode=border_mode,
+            # our activation function will handle the bias
+            use_bias=False)
+        # sigh. really REALLY do not use biases
+        layer.convolution.use_bias = False
     if layer_spec:
         logger.warn("ignoring unknown layer specification keys [%s]"
                     % " ".join(layer_spec.keys()))
@@ -54,7 +56,9 @@ def construct_cnn(name, layer_specs, n_channels, input_shape, batch_normalize):
                                     batch_normalize=batch_normalize)
                 for i, layer_spec in enumerate(layer_specs)],
         num_channels=n_channels,
-        image_size=tuple(input_shape))
+        image_size=tuple(input_shape),
+        # our activation function will handle the bias
+        use_bias=False)
     # ensure output dim is determined
     cnn.push_allocation_config()
     # variance-preserving initialization
@@ -96,14 +100,14 @@ def construct_mlp(name, hidden_dims, input_dim, batch_normalize, initargs=None, 
         bricks.NormalizedActivation(
             shape=[hidden_dim],
             name="activation_%i" % i,
-            # biases are handled by our activation function
-            use_bias=False,
             batch_normalize=batch_normalize,
             activation=activation)
         for i, (hidden_dim, activation)
         in enumerate(zip(hidden_dims, activations))]
     mlp = bricks.MLP(name=name,
                      activations=wrapped_activations,
+                     # biases are handled by our activation function
+                     use_bias=False,
                      dims=dims,
                      **initargs)
     return mlp
