@@ -37,6 +37,9 @@ def construct_cnn_layer(name, layer_spec, conv_module, ndim, batch_normalize):
             use_bias=False)
         # sigh. really REALLY do not use biases
         layer.convolution.use_bias = False
+        layer.convolution.weights_init = initialization.ConvolutionalInitialization(
+            initialization.Orthogonal())
+        layer.convolution.biases_init = initialization.Constant(0)
     if layer_spec:
         logger.warn("ignoring unknown layer specification keys [%s]"
                     % " ".join(layer_spec.keys()))
@@ -61,15 +64,6 @@ def construct_cnn(name, layer_specs, n_channels, input_shape, batch_normalize):
         use_bias=False)
     # ensure output dim is determined
     cnn.push_allocation_config()
-    # variance-preserving initialization
-    prev_num_filters = n_channels
-    for layer in cnn.layers:
-        if not hasattr(layer, "filter_size"):
-            continue
-        layer.weights_init = initialization.IsotropicGaussian(
-            std=np.sqrt(2./(np.prod(layer.filter_size) * prev_num_filters)))
-        layer.biases_init = initialization.Constant(0)
-        prev_num_filters = layer.num_filters
     # tell the activations what shapes they'll be dealing with
     for layer in cnn.layers:
         # woe is me
@@ -83,17 +77,21 @@ def construct_cnn(name, layer_specs, n_channels, input_shape, batch_normalize):
     cnn.initialize()
     return cnn
 
-def construct_mlp(name, hidden_dims, input_dim, batch_normalize, initargs=None, activations=None):
+def construct_mlp(name, hidden_dims, input_dim, batch_normalize,
+                  activations=None, weights_init=None, biases_init=None):
     if not hidden_dims:
         return bricks.FeedforwardIdentity(dim=input_dim)
-
-    initargs = initargs or dict()
 
     if not activations:
         activations = [bricks.Rectifier() for dim in hidden_dims]
     elif not isinstance(activations, collections.Iterable):
         activations = [activations] * len(hidden_dims)
     assert len(activations) == len(hidden_dims)
+
+    if not weights_init:
+        weights_init = initialization.Orthogonal()
+    if not biases_init:
+        biases_init = initialization.Constant(0)
 
     dims = [input_dim] + hidden_dims
     wrapped_activations = [
@@ -109,5 +107,6 @@ def construct_mlp(name, hidden_dims, input_dim, batch_normalize, initargs=None, 
                      # biases are handled by our activation function
                      use_bias=False,
                      dims=dims,
-                     **initargs)
+                     weights_init=weights_init,
+                     biases_init=biases_init)
     return mlp

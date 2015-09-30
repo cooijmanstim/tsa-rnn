@@ -40,8 +40,8 @@ class Emitter(bricks.Initializable):
                 hidden_dims=[input_dim/2, n],
                 name="mlp_%i" % i,
                 batch_normalize=batch_normalize,
-                initargs=dict(weights_init=initialization.Orthogonal(),
-                              biases_init=initialization.Constant(0)))
+                weights_init=initialization.Orthogonal(),
+                biases_init=initialization.Constant(0))
             for i, n in enumerate(self.n_classes)]
         self.softmax = bricks.Softmax()
 

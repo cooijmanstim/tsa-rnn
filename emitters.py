@@ -21,8 +21,8 @@ class SingleSoftmax(bricks.Initializable):
             input_dim=input_dim,
             hidden_dims=[input_dim/2, self.n_classes],
             batch_normalize=batch_normalize,
-            initargs=dict(weights_init=initialization.Orthogonal(),
-                          biases_init=initialization.Constant(0)))
+            weights_init=initialization.Orthogonal(),
+            biases_init=initialization.Constant(0))
         self.softmax = bricks.Softmax()
 
         self.children = [self.mlp, self.softmax]

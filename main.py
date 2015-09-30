@@ -55,14 +55,7 @@ def construct_model(patch_shape, hidden_dim, hyperparameters, **kwargs):
         hyperparameters=hyperparameters,
         # attend based on upper RNN states
         attention_state_name="states#1",
-        name="ram",
-        # blocks' push_initialization_config stinks; it overwrites everything
-        # that comes in its way, leaving us with no good way to specialize
-        # initialization for e.g. convolution layers deep inside the model.
-        # so we are doomed to use one initializer that "works" for every
-        # situation.
-        weights_init=initialization.IsotropicGaussian(std=1e-3),
-        biases_init=initialization.Constant(0))
+        name="ram")
 
 def construct_monitors(algorithm, task, n_patches, x, x_shape,
                        graph, name, ram, model, cost,
@@ -227,8 +220,6 @@ if __name__ == "__main__":
             hyperparameters.update(yaml.load(f))
 
     hyperparameters["n_spatial_dims"] = len(hyperparameters["patch_shape"])
-    hyperparameters["initargs"] = dict(weights_init=initialization.Orthogonal(),
-                                       biases_init=initialization.Constant(0))
     hyperparameters["hyperparameters"] = hyperparameters
 
     main_loop = construct_main_loop(**hyperparameters)

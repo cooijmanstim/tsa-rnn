@@ -38,7 +38,10 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
 
         self.rnn = bricks.RecurrentStack(
             [bricks.LSTM(activation=bricks.Tanh(), dim=hidden_dim),
-             bricks.LSTM(activation=bricks.Tanh(), dim=hidden_dim)])
+             bricks.LSTM(activation=bricks.Tanh(), dim=hidden_dim)],
+            weights_init=initialization.NormalizedInitialization(
+                initialization.IsotropicGaussian()),
+            biases_init=initialization.Constant(0))
 
         # name of the RNN state that determines the parameters of the next glimpse
         self.attention_state_name = attention_state_name
@@ -51,7 +54,12 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
             name="embedder",
             input_dim=self.response_mlp.output_dim,
             output_dim=4*self.rnn.get_dim("states"),
-            use_bias=True)
+            use_bias=True,
+            weights_init=initialization.Orthogonal(),
+            biases_init=initialization.Constant(0))
+        
+        # don't let blocks touch my children
+        self.initialization_config_pushed = True
 
         self.children.extend([self.rnn, self.cropper, self.embedder])
 
@@ -59,11 +67,11 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
         self.apply.outputs = self.rnn.apply.outputs
         self.compute_initial_state.outputs = self.rnn.apply.outputs
 
-    def construct_merger(self, n_spatial_dims, n_channels, patch_shape,
-                         response_dim, initargs,
-                         patch_cnn_spec, patch_mlp_spec,
-                         merge_mlp_spec, response_mlp_spec,
-                         batch_normalize, batch_normalize_patch, **kwargs):
+    def construct_merger(self, n_spatial_dims, n_channels,
+                         patch_shape, response_dim, patch_cnn_spec,
+                         patch_mlp_spec, merge_mlp_spec,
+                         response_mlp_spec, batch_normalize,
+                         batch_normalize_patch, **kwargs):
         # construct patch interpretation network
         patch_transforms = []
         if patch_cnn_spec:
@@ -82,7 +90,8 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
                 name="patch_mlp",
                 hidden_dims=patch_mlp_spec,
                 input_dim=patch_transforms[-1].output_dim,
-                initargs=initargs,
+                weights_init=initialization.Orthogonal(),
+                biases_init=initialization.Constant(0),
                 batch_normalize=batch_normalize_patch))
         self.patch_transform = bricks.FeedforwardSequence(
             [brick.apply for brick in patch_transforms], name="ffs")
@@ -92,7 +101,8 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
             name="merge_mlp",
             input_dim=2*n_spatial_dims,
             hidden_dims=merge_mlp_spec,
-            initargs=initargs,
+            weights_init=initialization.Orthogonal(),
+            biases_init=initialization.Constant(0),
             batch_normalize=batch_normalize)
 
         # construct what-where merger network
@@ -101,7 +111,10 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
             input_dims=[self.merge_mlp.output_dim,
                         self.patch_transform.output_dim],
             output_dim=response_dim,
-            prototype=bricks.Linear(use_bias=False),
+            prototype=bricks.Linear(
+                use_bias=False,
+                weights_init=initialization.Orthogonal(),
+                biases_init=initialization.Constant(0)),
             child_prefix="response_merge")
         self.response_merge_activation = bricks.NormalizedActivation(
             shape=[response_dim],
@@ -112,7 +125,8 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
             name="response_mlp",
             hidden_dims=response_mlp_spec,
             input_dim=response_dim,
-            initargs=initargs,
+            weights_init=initialization.Orthogonal(),
+            biases_init=initialization.Constant(0),
             batch_normalize=batch_normalize)
 
         self.children.extend([
@@ -124,20 +138,24 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
 
     def construct_locator(self, locate_mlp_spec, n_spatial_dims,
                           location_std, scale_std, batch_normalize,
-                          initargs, **kwargs):
+                          **kwargs):
         self.n_spatial_dims = n_spatial_dims
 
         self.locate_mlp = masonry.construct_mlp(
             name="locate_mlp",
             input_dim=self.get_dim(self.attention_state_name),
             hidden_dims=locate_mlp_spec,
-            initargs=initargs,
+            weights_init=initialization.Orthogonal(),
+            biases_init=initialization.Constant(0),
             batch_normalize=batch_normalize)
         self.theta_from_area = bricks.Linear(
             input_dim=self.locate_mlp.output_dim,
             output_dim=2*n_spatial_dims,
             name="theta_from_area",
-            **initargs)
+            # normalize columns because the fan-in is large
+            weights_init=initialization.NormalizedInitialization(
+                initialization.IsotropicGaussian()),
+            biases_init=initialization.Constant(1))
 
         self.T_rng = theano.sandbox.rng_mrg.MRG_RandomStreams(12345)
         self.location_std = location_std
@@ -153,11 +171,6 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
         except:
             return super(RecurrentAttentionModel, self).get_dim(name)
 
-    def initialize(self, *args, **kwargs):
-        super(RecurrentAttentionModel, self).initialize(*args, **kwargs)
-        for rnn in self.rnn.transitions:
-            initialization.Identity().initialize(rnn.W_state, rnn.rng)
-
     @application
     def apply(self, x, x_shape, **states):
         location, scale = self.locate(states[self.attention_state_name])
@@ -169,10 +182,6 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
     def locate(self, h):
         area = self.locate_mlp.apply(h)
         theta = self.theta_from_area.apply(area)
-        # going from area to theta is typically a huge reduction
-        # in dimensionality; divide each output by the fan-in to avoid
-        # large values
-        theta /= self.theta_from_area.input_dim
         location, scale = (theta[:, :self.n_spatial_dims],
                            theta[:, self.n_spatial_dims:])
         location += self.T_rng.normal(location.shape, std=self.location_std)
