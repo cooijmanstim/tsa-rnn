@@ -4,6 +4,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+import numpy as np
 import theano
 import theano.tensor as T
 
@@ -155,7 +156,10 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
             # normalize columns because the fan-in is large
             weights_init=initialization.NormalizedInitialization(
                 initialization.IsotropicGaussian()),
-            biases_init=initialization.Constant(1))
+            # initialize location biases to zero and scale biases to one
+            # so the model will zoom in by default
+            biases_init=initialization.Constant(np.array(
+                [0.] * n_spatial_dims + [1.] * n_spatial_dims)))
 
         self.T_rng = theano.sandbox.rng_mrg.MRG_RandomStreams(12345)
         self.location_std = location_std
