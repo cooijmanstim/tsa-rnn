@@ -41,6 +41,9 @@ class Classification(object):
 
     def load_datasets(self):
         raise NotImplementedError()
+        
+    def apply_default_transformers(self, stream):
+        return stream
 
     def get_stream_num_examples(self, which_set, monitor):
         return (self.datasets[which_set].num_examples
@@ -51,11 +54,11 @@ class Classification(object):
         if num_examples is None:
             num_examples = self.get_stream_num_examples(which_set, monitor=monitor)
         scheme = scheme_klass(num_examples, self.batch_size)
-        stream = Canonicalize(
-            DataStream.default_stream(
-                dataset=self.datasets[which_set],
-                iteration_scheme=scheme),
-            mapping=self.preprocess)
+        stream = DataStream.default_stream(
+            dataset=self.datasets[which_set],
+            iteration_scheme=scheme)
+        stream = self.apply_default_transformers(stream)
+        stream = Canonicalize(stream, mapping=self.preprocess)
         if center:
             stream = transformers.Mapping(stream, mapping=self.center)
         return stream
