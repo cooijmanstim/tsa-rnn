@@ -57,7 +57,7 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
             output_dim=4*self.rnn.get_dim("states"),
             use_bias=True,
             weights_init=initialization.Orthogonal(),
-            biases_init=initialization.Constant(0))
+            biases_init=initialization.Constant(1))
         
         # don't let blocks touch my children
         self.initialization_config_pushed = True
