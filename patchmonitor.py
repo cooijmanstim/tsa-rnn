@@ -147,6 +147,11 @@ class VideoPatchMonitoring(SimpleExtension):
             self.imshow(video_image, axes=video_ax, vmin=vmin, vmax=vmax)
             video_ax.axis("off")
 
+            true_locations, true_scales = self.map_to_input_space(
+                locations, scales,
+                np.array(patch_shape, dtype='float32'),
+                np.array(video_shape, dtype='float32'))
+
             patch_ax = plt.subplot(outer_grid[1, 0])
             patch_image = (patches
                            .transpose(0, 2, 1, 3)
@@ -154,13 +159,10 @@ class VideoPatchMonitoring(SimpleExtension):
                                      patches.shape[1]*patches.shape[3])))
             self.imshow(patch_image, axes=patch_ax, vmin=vmin, vmax=vmax)
             patch_ax.axis("off")
+            patch_ax.set_title("\n".join(map(str, (true_locations.T, true_scales.T))),
+                               family="monospace")
 
             # draw rectangles in video_ax to show patch support
-            true_locations, true_scales = self.map_to_input_space(
-                locations, scales,
-                np.array(patch_shape, dtype='float32'),
-                np.array(video_shape, dtype='float32'))
-
             for true_location, true_scale in zip(true_locations, true_scales):
                 # duration, height, width
                 patch_dhw = patch_shape / true_scale
