@@ -6,7 +6,9 @@ from blocks.bricks.base import application, lazy
 from blocks.roles import add_role, WEIGHT, BIAS
 from blocks.utils import shared_floatx_nans
 
-import blocks_bricks as bricks
+import blocks.bricks as bricks
+from blocks.bricks.conv import Flattener
+
 import initialization
 
 class NormalizedActivation(bricks.Initializable, bricks.Feedforward):
@@ -55,7 +57,7 @@ class NormalizedActivation(bricks.Initializable, bricks.Feedforward):
         except:
             return super(NormalizedActivation, self).get_dim(name)
 
-class FeedforwardFlattener(bricks.Flattener, bricks.Feedforward):
+class FeedforwardFlattener(Flattener, bricks.Feedforward):
     def __init__(self, input_shape, **kwargs):
         super(FeedforwardFlattener, self).__init__(**kwargs)
         self.input_shape = input_shape
