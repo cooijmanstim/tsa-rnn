@@ -34,8 +34,16 @@ class JpegHDF5Dataset(fuel.datasets.H5PYDataset):
         image = np.array(image).astype(np.float32) / 255.0
         return image
 
-def len_of_video((video, target)):
-    return len(video)
+rng = np.random.RandomState(0)
+def random_crops((videos, targets)):
+    mintime = min(len(video) for video in videos)
+    crop_shape = np.array([mintime, 100, 140])
+    offsets = [[rng.randint(0, dim + 1) for dim in video.shape - crop_shape]
+               for video in videos]
+    videos = [video[tuple(slice(i, i + k)
+                          for i, k in zip(offset, crop_shape))]
+              for video, offset in zip(videos, offsets)]
+    return videos, targets
 
 class Task(tasks.Classification):
     name = "kth"
@@ -50,13 +58,8 @@ class Task(tasks.Classification):
                     for which_set in "train valid test".split())
 
     def apply_default_transformers(self, stream):
-        stream = fuel.transformers.Unpack(stream)
-        stream = fuel.transformers.Batch(
-            stream, fuel.schemes.ConstantScheme(32 * self.batch_size))
         stream = fuel.transformers.Mapping(
-            stream, mapping=fuel.transformers.SortMapping(len_of_video))
-        stream = fuel.transformers.Cache(
-            stream, fuel.schemes.ConstantScheme(32))
+            stream, mapping=random_crops)
         stream = transformers.PaddingShape(
             stream, shape_sources=["videos"])
         return stream
