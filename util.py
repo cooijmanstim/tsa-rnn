@@ -5,7 +5,6 @@ import itertools as it
 import numbers
 from theano.compile import ViewOp
 from collections import OrderedDict
-from blocks.utils import named_copy
 from blocks.initialization import NdarrayInitialization
 
 import theano.tensor as T
@@ -52,7 +51,7 @@ class Channels(object):
 
     def append(self, quantity, name=None):
         if name is not None:
-            quantity = named_copy(quantity, name)
+            quantity = quantity.copy(name=name)
         self.dikt.setdefault(quantity.name, []).append(quantity)
 
     def extend(self, quantities):
@@ -67,8 +66,8 @@ class Channels(object):
             else:
                 # name not unique; uniquefy
                 for i, quantity in enumerate(quantities):
-                    channels.append(named_copy(
-                        quantity, "%s[%i]" % (quantity.name, i)))
+                    channels.append(quantity.copy(name="%s[%i]"
+                                                  % (quantity.name, i)))
         return channels
 
 def dict_merge(*dikts):
