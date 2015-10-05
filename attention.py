@@ -188,8 +188,14 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
         theta = self.theta_from_area.apply(area)
         location, scale = (theta[:, :self.n_spatial_dims],
                            theta[:, self.n_spatial_dims:])
-        location += self.T_rng.normal(location.shape, std=self.location_std)
-        scale += self.T_rng.normal(scale.shape, std=self.scale_std)
+        location = util.tag_for_replacement(
+            location, location + self.T_rng.normal(
+                location.shape, std=self.location_std, dtype=location.dtype),
+            "location_noise")
+        scale = util.tag_for_replacement(
+            scale, scale + self.T_rng.normal(
+                scale.shape, std=self.scale_std, dtype=scale.dtype),
+            "scale_noise")
         return location, scale
 
     def merge(self, patch, location, scale):

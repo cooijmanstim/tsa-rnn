@@ -43,9 +43,11 @@ def construct_model(patch_shape, hidden_dim, hyperparameters, **kwargs):
         attention_state_name="states#1",
         name="ram")
 
-def construct_monitors(algorithm, task, n_patches, x, x_shape,
-                       graphs, name, ram, model,
-                       n_spatial_dims, plot_url, patchmonitor_interval=100, **kwargs):
+@util.checkargs
+def construct_monitors(algorithm, task, n_patches, x, x_shape, graphs,
+                       name, ram, model, n_spatial_dims, plot_url,
+                       hyperparameters, patchmonitor_interval=100,
+                       **kwargs):
     extensions = []
 
     if True:
@@ -65,6 +67,8 @@ def construct_monitors(algorithm, task, n_patches, x, x_shape,
                 quantity = parameter.mean()
                 quantity.name = "%s.mean" % util.get_path(parameter)
                 data_independent_channels.append(quantity)
+        for key in "location_std scale_std".split():
+            data_independent_channels.append(hyperparameters[key].copy(name=key))
 
         extensions.append(DataStreamMonitoring(
             data_independent_channels.get_channels(),
@@ -136,10 +140,14 @@ def construct_monitors(algorithm, task, n_patches, x, x_shape,
 
     return extensions
 
-def get_training_graph(cost):
-    return ComputationGraph(cost)
+def get_training_graph(cost, emitter, dropout, **kwargs):
+    [cost] = util.replace_by_tags(
+        [cost], "location_noise scale_noise".split())
+    graph = ComputationGraph(cost)
+    graph = emitter.apply_dropout(graph, dropout)
+    return graph
 
-def get_inference_graph(cost):
+def get_inference_graph(cost, **kwargs):
     return ComputationGraph(cost)
 
 def construct_main_loop(name, task_name, patch_shape, batch_size,
@@ -173,18 +181,18 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
 
     print "setting up main loop..."
     graphs = OrderedDict()
-    graphs["train"] = get_training_graph(cost)
-    graphs["test"] = get_inference_graph(cost)
+    graphs["train"] = get_training_graph(cost, emitter=emitter, **hyperparameters)
+    graphs["test"] = get_inference_graph(cost, **hyperparameters)
     graphs["valid"] = graphs["test"]
 
     uselessflunky = Model(cost)
     algorithm = GradientDescent(
-        cost=graph["train"].outputs[0],
-        parameters=graph["train"].parameters,
+        cost=graphs["train"].outputs[0],
+        parameters=graphs["train"].parameters,
         step_rule=CompositeRule([StepClipping(1e2),
                                  Adam(learning_rate=learning_rate)]))
     monitors = construct_monitors(
-        x=x, x_shape=x_shape, y=y, cost=cost,
+        x=x, x_shape=x_shape,
         algorithm=algorithm, task=task, model=uselessflunky, ram=ram,
         graphs=graphs, **hyperparameters)
     main_loop = MainLoop(data_stream=task.get_stream("train"),

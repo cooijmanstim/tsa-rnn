@@ -93,6 +93,11 @@ class Emitter(bricks.Initializable):
         cost = mean_cross_entropy
         return cost
 
+    def apply_dropout(self, graph, dropout):
+        # TODO: figure out how to drop out the various mlps without
+        # dropping out the input more than once
+        raise NotImplementedError()
+
 class NumberTask(tasks.Classification):
     name = "svhn_number"
 

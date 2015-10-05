@@ -1,6 +1,12 @@
+import logging
+logger = logging.getLogger(__name__)
+
 import theano.tensor as T
 
+import blocks.graph
 from blocks.bricks.base import application
+import blocks.filter as filter
+import blocks.roles as roles
 
 import bricks
 import initialization
@@ -37,3 +43,14 @@ class SingleSoftmax(bricks.Initializable):
         self.add_auxiliary_variable(cross_entropy, name="cross_entropy")
         self.add_auxiliary_variable(error_rate, name="error_rate")
         return cost
+
+    def apply_dropout(self, graph, dropout):
+        dropout_variables = (
+            filter.VariableFilter(
+                roles=[roles.INPUT],
+                bricks=[brick for brick in self.mlp.children
+                        if isinstance(brick, bricks.Linear)])
+            (graph.variables))
+        logger.warning("dropping out %s" % dropout_variables)
+        return blocks.graph.apply_dropout(
+            graph, dropout_variables, dropout)

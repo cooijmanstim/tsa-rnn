@@ -158,3 +158,30 @@ def get_path(x):
         return get_path(x.application.brick)
     else:
         raise TypeError()
+
+from theano.scan_module.scan_utils import map_variables
+
+def tag_for_replacement(variable, replacement, key):
+    # copy `variable` so that only the copy has the tag and any
+    # appearances of `variable` in `replacement` do not (or
+    # replacement will not terminate)
+    variable = variable.copy()
+    if not hasattr(variable.tag, "replacements"):
+        variable.tag.replacements = dict()
+    assert key not in variable.tag.replacements
+    variable.tag.replacements[key] = replacement
+    return variable
+
+def replace_by_tags(variables, keys):
+    def maybe_replace_one(variable):
+        # do replacements in order specified by `keys`
+        for key in keys:
+            if not hasattr(variable.tag, "replacements"):
+                return variable
+            if key in variable.tag.replacements:
+                replacement = variable.tag.replacements[key]
+                logger.warning("replace_by_tags: %s: %s -> %s"
+                               % (key, variable, replacement))
+                variable = replacement
+        return variable
+    return map_variables(maybe_replace_one, variables)
