@@ -44,55 +44,61 @@ def construct_model(patch_shape, hidden_dim, hyperparameters, **kwargs):
         name="ram")
 
 def construct_monitors(algorithm, task, n_patches, x, x_shape,
-                       graph, name, ram, model, cost,
+                       graphs, name, ram, model,
                        n_spatial_dims, plot_url, patchmonitor_interval=100, **kwargs):
-    location, scale, true_location, true_scale, savings = util.get_recurrent_auxiliaries(
-        "location scale true_location true_scale savings".split(), graph, n_patches)
-
-    channels = util.Channels()
-    channels.extend(task.monitor_channels(graph))
-
-    channels.append(util.named(savings.mean(), "savings.mean"))
-
-    for variable_name in "location scale".split():
-        variable = locals()[variable_name]
-        channels.append(variable.mean(axis=0),
-                        "%s.mean" % variable_name)
-        channels.append(variable.var(axis=0),
-                        "%s.variance" % variable_name)
-
-    channels.append(algorithm.total_gradient_norm,
-                    "total_gradient_norm")
-
-    step_norms = util.Channels()
-    step_norms.extend(util.named(l2_norm([algorithm.steps[param]]),
-                                 "%s.step_norm" % name)
-                      for name, param in model.get_parameter_dict().items())
-    step_channels = step_norms.get_channels()
-
-    #for activation in VariableFilter(roles=[OUTPUT])(graph.variables):
-    #    quantity = activation.mean()
-    #    quantity.name = "%s.mean" % util.get_path(activation)
-    #    channels.append(quantity)
-
-    data_independent_channels = util.Channels()
-    for parameter in graph.parameters:
-        if parameter.name in "gamma beta".split():
-            quantity = parameter.mean()
-            quantity.name = "%s.mean" % util.get_path(parameter)
-            data_independent_channels.append(quantity)
-
     extensions = []
 
-    extensions.append(TrainingDataMonitoring(
-        step_channels, prefix="train", after_epoch=True))
+    if True:
+        step_norms = util.Channels()
+        step_norms.extend(util.named(l2_norm([algorithm.steps[param]]),
+                                     "%s.step_norm" % name)
+                          for name, param in model.get_parameter_dict().items())
+        step_channels = step_norms.get_channels()
 
-    extensions.append(DataStreamMonitoring(data_independent_channels.get_channels(),
-                                           data_stream=None, after_epoch=True))
-    extensions.extend(DataStreamMonitoring((channels.get_channels() + [cost]),
-                                           data_stream=task.get_stream(which, monitor=True),
-                                           prefix=which, after_epoch=True)
-                      for which in "train valid test".split())
+        extensions.append(TrainingDataMonitoring(
+            step_channels, prefix="train", after_epoch=True))
+
+    if True:
+        data_independent_channels = util.Channels()
+        for parameter in graphs["train"].parameters:
+            if parameter.name in "gamma beta".split():
+                quantity = parameter.mean()
+                quantity.name = "%s.mean" % util.get_path(parameter)
+                data_independent_channels.append(quantity)
+
+        extensions.append(DataStreamMonitoring(
+            data_independent_channels.get_channels(),
+            data_stream=None, after_epoch=True))
+
+    for which_set in "train valid test".split():
+        graph = graphs[which_set]
+
+        channels = util.Channels()
+        channels.extend(task.monitor_channels(graph))
+
+        (location, scale,
+         true_location, true_scale,
+         savings) = util.get_recurrent_auxiliaries(
+            "location scale true_location true_scale savings".split(),
+             graph, n_patches)
+
+        channels.append(util.named(savings.mean(), "savings.mean"))
+
+        for variable_name in "location scale".split():
+            variable = locals()[variable_name]
+            channels.append(variable.mean(axis=0).T,
+                            "%s.mean" % variable_name)
+            channels.append(variable.var(axis=0).T,
+                            "%s.variance" % variable_name)
+
+        if which_set == "train":
+            channels.append(algorithm.total_gradient_norm,
+                            "total_gradient_norm")
+
+        extensions.append(DataStreamMonitoring(
+            (channels.get_channels() + graph.outputs[0]),
+            data_stream=task.get_stream(which_set, monitor=True),
+            prefix=which_set, after_epoch=True))
 
     patchmonitor = None
     if n_spatial_dims == 2:
@@ -130,6 +136,12 @@ def construct_monitors(algorithm, task, n_patches, x, x_shape,
 
     return extensions
 
+def get_training_graph(cost):
+    return ComputationGraph(cost)
+
+def get_inference_graph(cost):
+    return ComputationGraph(cost)
+
 def construct_main_loop(name, task_name, patch_shape, batch_size,
                         n_spatial_dims, n_patches, n_epochs,
                         learning_rate, hyperparameters, **kwargs):
@@ -160,17 +172,21 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
     cost.name = "cost"
 
     print "setting up main loop..."
-    graph = ComputationGraph(cost)
+    graphs = OrderedDict()
+    graphs["train"] = get_training_graph(cost)
+    graphs["test"] = get_inference_graph(cost)
+    graphs["valid"] = graphs["test"]
+
     uselessflunky = Model(cost)
     algorithm = GradientDescent(
-        cost=cost,
-        parameters=graph.parameters,
+        cost=graph["train"].outputs[0],
+        parameters=graph["train"].parameters,
         step_rule=CompositeRule([StepClipping(1e2),
                                  Adam(learning_rate=learning_rate)]))
     monitors = construct_monitors(
         x=x, x_shape=x_shape, y=y, cost=cost,
         algorithm=algorithm, task=task, model=uselessflunky, ram=ram,
-        graph=graph, **hyperparameters)
+        graphs=graphs, **hyperparameters)
     main_loop = MainLoop(data_stream=task.get_stream("train"),
                          algorithm=algorithm,
                          extensions=(monitors +
