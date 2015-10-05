@@ -10,6 +10,7 @@ import theano.sandbox.rng_mrg
 
 from blocks.model import Model
 from blocks.algorithms import GradientDescent, RMSProp, Adam, CompositeRule, StepClipping
+from blocks.extensions.training import SharedVariableModifier
 from blocks.extensions.monitoring import TrainingDataMonitoring, DataStreamMonitoring
 from blocks.extensions.saveload import Checkpoint
 from blocks.main_loop import MainLoop
@@ -27,7 +28,6 @@ import attention
 import crop
 import tasks
 from patchmonitor import PatchMonitoring, VideoPatchMonitoring
-
 from dump import Dump, DumpMinimum, PrintingTo, load_model_parameters
 
 floatX = theano.config.floatX
@@ -159,6 +159,16 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
     task = tasks.get_task(**hyperparameters)
     hyperparameters["n_channels"] = task.n_channels
 
+    extensions = []
+
+    # let theta noise decay as training progresses
+    for key in "location_std scale_std".split():
+        hyperparameters[key] = theano.shared(hyperparameters[key], name=key)
+        rate = hyperparameters["%s_decay" % key]
+        extensions.append(SharedVariableModifier(
+            hyperparameters[key],
+            lambda i, x: rate * x))
+
     theano.config.compute_test_value = "warn"
 
     x, x_shape, y = task.get_variables()
@@ -191,21 +201,22 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
         parameters=graphs["train"].parameters,
         step_rule=CompositeRule([StepClipping(1e2),
                                  Adam(learning_rate=learning_rate)]))
-    monitors = construct_monitors(
+    extensions.extend(construct_monitors(
         x=x, x_shape=x_shape,
         algorithm=algorithm, task=task, model=uselessflunky, ram=ram,
-        graphs=graphs, **hyperparameters)
+        graphs=graphs, **hyperparameters))
+    extensions.extend([
+        FinishAfter(after_n_epochs=n_epochs),
+        DumpMinimum(name+'_best', channel_name='valid_error_rate'),
+        Dump(name+'_dump', every_n_epochs=10),
+        #Checkpoint(name+'_checkpoint.pkl', every_n_epochs=10, on_interrupt=False),
+        ProgressBar(),
+        Timing(),
+        Printing(),
+        PrintingTo(name+"_log")])
     main_loop = MainLoop(data_stream=task.get_stream("train"),
                          algorithm=algorithm,
-                         extensions=(monitors +
-                                     [FinishAfter(after_n_epochs=n_epochs),
-                                      DumpMinimum(name+'_best', channel_name='valid_error_rate'),
-                                      Dump(name+'_dump', every_n_epochs=10),
-                                      #Checkpoint(name+'_checkpoint.pkl', every_n_epochs=10, on_interrupt=False),
-                                      ProgressBar(),
-                                      Timing(),
-                                      Printing(),
-                                      PrintingTo(name+"_log")]),
+                         extensions=extensions,
                          model=uselessflunky)
     return main_loop
 

@@ -28,7 +28,9 @@ learning_rate: 0.0001
 batched_window: True
 cutoff: 3
 location_std: 0.1
+location_std_decay: 0.99
 scale_std: 0.01
+scale_std_decay: 0.99
 dropout: 0.8
 batch_normalize: False
 batch_normalize_patch: True
