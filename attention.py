@@ -15,6 +15,7 @@ import bricks
 import initialization
 
 import masonry
+import util
 
 floatX = theano.config.floatX
 
