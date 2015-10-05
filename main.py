@@ -221,11 +221,12 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    with open(os.path.join(os.path.dirname(__file__), "defaults.yaml"), "rb") as f:
+    hyperparameters_path = getattr(
+        args, "hyperparameters",
+        os.path.join(os.path.dirname(__file__), "defaults.yaml"))
+
+    with open(hyperparameters_path, "rb") as f:
         hyperparameters = yaml.load(f)
-    if args.hyperparameters:
-        with open(args.hyperparameters, "rb") as f:
-            hyperparameters.update(yaml.load(f))
 
     hyperparameters["n_spatial_dims"] = len(hyperparameters["patch_shape"])
     hyperparameters["hyperparameters"] = hyperparameters
