@@ -49,8 +49,8 @@ class LocallySoftRectangularCropper(Brick):
         b += self.kernel.k_sigma_radius(self.cutoff, scale)
 
         # clip to fit inside image and have nonempty window
-        a = T.clip(a, 0,     image_shape[0] - 1)
-        b = T.clip(b, a + 1, image_shape[1])
+        a = T.clip(a, 0,     image_shape - 1)
+        b = T.clip(b, a + 1, image_shape)
 
         if self.batched_window:
             # take the bounding box of all windows; now the slices
