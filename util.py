@@ -1,6 +1,7 @@
 import logging
 logger = logging.getLogger(__name__)
 
+import operator
 import itertools as it
 import numbers
 from theano.compile import ViewOp
@@ -107,11 +108,20 @@ def batched_tensordot(a, b, axes=2):
 import theano.printing
 from blocks.filter import VariableFilter
 import numpy as np
+from theano.scan_module.scan_utils import equal_computations
+
+def dedup(xs, equal=operator.is_):
+    ys = []
+    for x in xs:
+        if not any(equal(x, y) for y in ys):
+            ys.append(x)
+    return ys
 
 def get_recurrent_auxiliaries(names, graph, n_steps=None):
     variables = []
     for name in names:
         steps = VariableFilter(name=name)(graph.auxiliary_variables)
+        steps = dedup(steps, equal=lambda a, b: equal_computations([a], [b]))
 
         if n_steps is not None:
             assert len(steps) == n_steps
