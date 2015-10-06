@@ -21,10 +21,10 @@ class LocallySoftRectangularCropper(Brick):
     def compute_crop_matrices(self, locations, scales, Is):
         Ws = []
         for axis in xrange(self.n_spatial_dims):
-            n = T.cast(self.patch_shape[axis], 'float32')
-            I = Is[axis].dimshuffle('x', 0, 'x')    # (1, hardcrop_dim, 1)
-            J = T.arange(n).dimshuffle('x', 'x', 0) # (1, 1, patch_dim)
+            n = T.cast(self.patch_shape[axis], floatX)
 
+            I = T.cast(Is[axis], floatX).dimshuffle('x', 0, 'x')    # (1, hardcrop_dim, 1)
+            J = T.arange(n).dimshuffle('x', 'x', 0)                 # (1, 1, patch_dim)
             location = locations[:, axis].dimshuffle(0, 'x', 'x')   # (batch_size, 1, 1)
             scale    = scales   [:, axis].dimshuffle(0, 'x', 'x')   # (batch_size, 1, 1)
 
@@ -38,9 +38,11 @@ class LocallySoftRectangularCropper(Brick):
         return Ws
 
     def compute_hard_windows(self, image_shape, location, scale):
+        patch_shape = T.cast(self.patch_shape, floatX)
+
         # find topleft(front) and bottomright(back) corners for each patch
-        a = location - 0.5 * (self.patch_shape / scale)
-        b = location + 0.5 * (self.patch_shape / scale)
+        a = location - 0.5 * (patch_shape / scale)
+        b = location + 0.5 * (patch_shape / scale)
 
         # grow by three patch pixels
         a -= self.kernel.k_sigma_radius(self.cutoff, scale)

@@ -185,3 +185,27 @@ def replace_by_tags(variables, keys):
                 variable = replacement
         return variable
     return map_variables(maybe_replace_one, variables)
+
+# decorator to improve python's terrible argument error reporting
+def checkargs(f):
+    def g(*args, **kwargs):
+        try:
+            return f(*args, **kwargs)
+        except TypeError as e:
+            type, value, traceback = sys.exc_info()
+            if "takes exactly" in e.message:
+                import inspect
+                argspec = inspect.getargspec(f)
+                required_args = argspec.args
+                if argspec.defaults:
+                    required_args = required_args[:-len(argspec.defaults)]
+                required_args = [arg for arg in required_args
+                                 if arg not in kwargs]
+                missing_args = required_args[len(args):]
+                if missing_args:
+                    # reraise with more informative message
+                    message = ("%s. not given: %s" %
+                               (e.message, ", ".join(missing_args)))
+                    raise type, (message,), traceback
+            raise
+    return g

@@ -69,6 +69,7 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
         self.apply.outputs = self.rnn.apply.outputs
         self.compute_initial_state.outputs = self.rnn.apply.outputs
 
+    @util.checkargs
     def construct_merger(self, n_spatial_dims, n_channels,
                          patch_shape, response_dim, patch_cnn_spec,
                          patch_mlp_spec, merge_mlp_spec,
@@ -138,6 +139,7 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
             self.merge_mlp,
             self.response_mlp])
 
+    @util.checkargs
     def construct_locator(self, locate_mlp_spec, n_spatial_dims,
                           location_std, scale_std, batch_normalize,
                           **kwargs):

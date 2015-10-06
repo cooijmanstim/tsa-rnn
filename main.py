@@ -33,6 +33,7 @@ from dump import Dump, DumpMinimum, PrintingTo, load_model_parameters
 
 floatX = theano.config.floatX
 
+@util.checkargs
 def construct_model(patch_shape, hidden_dim, hyperparameters, **kwargs):
     cropper = crop.LocallySoftRectangularCropper(
         name="cropper", kernel=crop.Gaussian(),
@@ -141,6 +142,7 @@ def construct_monitors(algorithm, task, n_patches, x, x_shape, graphs,
 
     return extensions
 
+@util.checkargs
 def get_training_graph(cost, emitter, dropout, **kwargs):
     [cost] = util.replace_by_tags(
         [cost], "location_noise scale_noise".split())
@@ -148,9 +150,11 @@ def get_training_graph(cost, emitter, dropout, **kwargs):
     graph = emitter.apply_dropout(graph, dropout)
     return graph
 
+@util.checkargs
 def get_inference_graph(cost, **kwargs):
     return ComputationGraph(cost)
 
+@util.checkargs
 def construct_main_loop(name, task_name, patch_shape, batch_size,
                         n_spatial_dims, n_patches, n_epochs,
                         learning_rate, hyperparameters, **kwargs):
