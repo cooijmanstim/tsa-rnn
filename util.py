@@ -158,7 +158,9 @@ def tag_for_replacement(variable, replacement, key):
         variable.tag.replacements = dict()
     assert key not in variable.tag.replacements
     variable.tag.replacements[key] = replacement
-    return variable
+    # return a copy so that tags put onto it by the caller are
+    # not lost after replacement
+    return variable.copy()
 
 def replace_by_tags(variables, keys):
     def maybe_replace_one_once(variable):
