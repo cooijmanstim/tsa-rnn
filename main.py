@@ -115,10 +115,10 @@ def construct_monitors(algorithm, task, n_patches, x, x_shape, graphs,
         patchmonitor_klass = VideoPatchMonitoring
 
     if patchmonitor_klass:
-        patch = T.stack(*[ram.crop(x, x_shape,
-                                   raw_location[:, i, :],
-                                   raw_scale[:, i, :])
-                          for i in xrange(n_patches)])
+        patch = T.stack([ram.crop(x, x_shape,
+                                  raw_location[:, i, :],
+                                  raw_scale[:, i, :])
+                         for i in xrange(n_patches)])
         patch = patch.dimshuffle(1, 0, *range(2, patch.ndim))
         patch_extractor = theano.function(
             [x, x_shape], [raw_location, raw_scale, patch])

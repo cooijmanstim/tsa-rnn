@@ -153,8 +153,8 @@ if __name__ == "__main__":
     locations = (np.ones((n_patches, batch_size, 2)) * image_shape/2).astype(np.float32)
     scales = np.tile(scales[:, np.newaxis, np.newaxis], (1, batch_size, 2)).astype(np.float32)
 
-    Tpatches = T.stack(*[cropper.apply(x_uncentered, T.constant(location), T.constant(scale))
-                         for location, scale in zip(locations, scales)])
+    Tpatches = T.stack([cropper.apply(x_uncentered, T.constant(location), T.constant(scale))
+                        for location, scale in zip(locations, scales)])
 
     patches = theano.function([x_uncentered], Tpatches)(batch["features"])
 

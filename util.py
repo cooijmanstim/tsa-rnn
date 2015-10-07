@@ -111,7 +111,7 @@ def get_recurrent_auxiliaries(names, graph, n_steps=None, require_in_graph=False
                    ([len(theano.printing.debugprint(step, file="str"))
                      for step in steps]))
 
-        variable = T.stack(*steps)
+        variable = T.stack(steps)
         # move batch axis before rnn time axis
         variable = variable.dimshuffle(1, 0, *range(2, variable.ndim))
         variables.append(variable)

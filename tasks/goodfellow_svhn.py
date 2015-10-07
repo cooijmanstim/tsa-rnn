@@ -57,7 +57,7 @@ class Emitter(bricks.Initializable):
         length_masks = _length_masks[lengths]
 
         def compute_yhat(logprobs):
-            digits_logprobs = T.stack(*logprobs[:-1]) # (#positions, batch, #classes)
+            digits_logprobs = T.stack(logprobs[:-1]) # (#positions, batch, #classes)
             length_logprobs = logprobs[-1]           # (batch, #classes)
             # predict digits independently
             digits_hat = digits_logprobs.argmax(axis=2) # (#positions, batch)
@@ -77,10 +77,10 @@ class Emitter(bricks.Initializable):
                        for i, logprob in enumerate(logprobs)).mean()
         def compute_error_rate(y, logprobs):
             yhat = compute_yhat(logprobs)
-            return T.stack(*[T.neq(y[:, i], yhat[:, i])
-                             # to avoid punishing predictions of nonexistent digits:
-                             * (length_masks[:, i] if i < max_length else 1)
-                             for i, logprob in enumerate(logprobs)]).any(axis=0).mean()
+            return T.stack([T.neq(y[:, i], yhat[:, i])
+                            # to avoid punishing predictions of nonexistent digits:
+                            * (length_masks[:, i] if i < max_length else 1)
+                            for i, logprob in enumerate(logprobs)]).any(axis=0).mean()
 
         logprobs = [self.softmax.log_probabilities(emitter.apply(x))
                     for emitter in self.emitters]
