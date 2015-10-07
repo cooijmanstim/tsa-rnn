@@ -87,10 +87,18 @@ def dedup(xs, equal=operator.is_):
             ys.append(x)
     return ys
 
-def get_recurrent_auxiliaries(names, graph, n_steps=None):
+def get_recurrent_auxiliaries(names, graph, n_steps=None, require_in_graph=False):
+    if require_in_graph:
+        # ComputationGraph.auxiliary_variables includes auxiliaries
+        # that may no longer be in the theano graph (except through
+        # annotations). use `require_in_graph` to filter them out.
+        all_variables = set(theano.gof.graph.ancestors(graph.outputs))
+
     variables = []
     for name in names:
         steps = VariableFilter(name=name)(graph.auxiliary_variables)
+        if require_in_graph:
+            steps = [step for step in steps if step in all_variables]
         steps = dedup(steps, equal=lambda a, b: equal_computations([a], [b]))
 
         if n_steps is not None:
