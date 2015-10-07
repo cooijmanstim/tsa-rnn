@@ -132,7 +132,8 @@ def get_training_graph(cost, emitter, dropout, **kwargs):
     [cost] = util.replace_by_tags(
         [cost], "location_noise scale_noise".split())
     graph = ComputationGraph(cost)
-    graph = emitter.apply_dropout(graph, dropout)
+    if dropout > 0.0:
+        graph = emitter.apply_dropout(graph, dropout)
     return graph
 
 @util.checkargs
