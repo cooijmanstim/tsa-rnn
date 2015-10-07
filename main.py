@@ -10,9 +10,8 @@ from blocks.extensions import FinishAfter, Printing, ProgressBar, Timing
 from blocks.extensions.training import SharedVariableModifier
 from blocks.extensions.monitoring import TrainingDataMonitoring, DataStreamMonitoring
 from blocks.extensions.saveload import Checkpoint
-import util, attention, crop, tasks
+import util, attention, crop, tasks, dump
 from patchmonitor import PatchMonitoring, VideoPatchMonitoring
-from dump import Dump, DumpMinimum, PrintingTo, load_model_parameters
 
 floatX = theano.config.floatX
 
@@ -198,13 +197,12 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
         graphs=graphs, **hyperparameters))
     extensions.extend([
         FinishAfter(after_n_epochs=n_epochs),
-        DumpMinimum(name+'_best', channel_name='valid_error_rate'),
-        Dump(name+'_dump', every_n_epochs=10),
-        #Checkpoint(name+'_checkpoint.pkl', every_n_epochs=10, on_interrupt=False),
+        dump.DumpBest('valid_error_rate', name+'_best.zip'),
+        dump.LightCheckpoint(name+'_checkpoint.zip', on_interrupt=False),
         ProgressBar(),
         Timing(),
         Printing(),
-        PrintingTo(name+"_log")])
+        dump.PrintingTo(name+"_log")])
     main_loop = MainLoop(data_stream=task.get_stream("train"),
                          algorithm=algorithm,
                          extensions=extensions,
@@ -219,7 +217,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--hyperparameters", help="YAML file from which to load hyperparameters")
-    parser.add_argument("--parameters", help="npy/npz file from which to load parameters")
+    parser.add_argument("--checkpoint", help="LightCheckpoint zipfile from which to resume training")
 
     args = parser.parse_args()
 
@@ -235,8 +233,8 @@ if __name__ == "__main__":
 
     main_loop = construct_main_loop(**hyperparameters)
 
-    if args.parameters:
-        load_model_parameters(args.parameters, main_loop.model)
+    if args.checkpoint:
+        dump.load_main_loop(main_loop, args.checkpoint)
 
     print "training..."
     main_loop.run()
