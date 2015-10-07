@@ -82,15 +82,17 @@ def construct_monitors(algorithm, task, n_patches, x, x_shape, graphs,
         channels = util.Channels()
         channels.extend(task.monitor_channels(graph))
 
-        (location, scale,
-         true_location, true_scale,
-         savings) = util.get_recurrent_auxiliaries(
-            "location scale true_location true_scale savings".split(),
-             graph, n_patches)
+        (raw_location, raw_scale,
+         true_location, true_scale) = util.get_recurrent_auxiliaries(
+             "raw_location raw_scale true_location true_scale".split(),
+             graph, n_patches, require_in_graph=True)
+
+        savings, = util.get_recurrent_auxiliaries(
+            "savings".split(), graph, n_patches)
 
         channels.append(savings.mean().copy(name="savings.mean"))
 
-        for variable_name in "location scale".split():
+        for variable_name in "raw_location raw_scale".split():
             variable = locals()[variable_name]
             channels.append(variable.mean(axis=0).T,
                             "%s.mean" % variable_name)
@@ -102,7 +104,7 @@ def construct_monitors(algorithm, task, n_patches, x, x_shape, graphs,
                             "total_gradient_norm")
 
         extensions.append(DataStreamMonitoring(
-            (channels.get_channels() + graph.outputs[0]),
+            (channels.get_channels() + graph.outputs),
             data_stream=task.get_stream(which_set, monitor=True),
             prefix=which_set, after_epoch=True))
 
@@ -113,12 +115,13 @@ def construct_monitors(algorithm, task, n_patches, x, x_shape, graphs,
         patchmonitor_klass = VideoPatchMonitoring
 
     if patchmonitor_klass:
-        patch = T.stack(*[
-            ram.crop(x, x_shape, location[:, i, :], scale[:, i, :])
-            for i in xrange(n_patches)])
+        patch = T.stack(*[ram.crop(x, x_shape,
+                                   raw_location[:, i, :],
+                                   raw_scale[:, i, :])
+                          for i in xrange(n_patches)])
         patch = patch.dimshuffle(1, 0, *range(2, patch.ndim))
-        patch_extractor = theano.function([x, x_shape],
-                                          [location, scale, patch])
+        patch_extractor = theano.function(
+            [x, x_shape], [raw_location, raw_scale, patch])
 
         for which in "train valid".split():
             patchmonitor = patchmonitor_klass(

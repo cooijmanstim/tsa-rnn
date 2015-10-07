@@ -213,21 +213,22 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
         batch_size = x_shape.shape[0]
         initial_states = self.rnn.initial_states(batch_size, as_dict=True)
         # condition on initial shrink-to-fit patch
-        location = T.alloc(T.cast(0.0, floatX),
-                           batch_size, self.cropper.n_spatial_dims)
-        scale = T.zeros_like(location)
-        patch = self.crop(x, x_shape, location, scale)
-        u = self.embedder.apply(self.merge(patch, location, scale))
+        raw_location = T.alloc(T.cast(0.0, floatX),
+                               batch_size, self.cropper.n_spatial_dims)
+        raw_scale = T.zeros_like(raw_location)
+        patch = self.crop(x, x_shape, raw_location, raw_scale)
+        u = self.embedder.apply(self.merge(patch, raw_location, raw_scale))
         conditioned_states = self.rnn.apply(as_dict=True, inputs=u, iterate=False, **initial_states)
         return tuple(conditioned_states.values())
 
-    def crop(self, x, x_shape, location, scale):
-        true_location, true_scale = self.map_to_input_space(x_shape, location, scale)
-        patch = self.cropper.apply(x, x_shape, true_location, true_scale)
-        self.add_auxiliary_variable(location, name="location")
-        self.add_auxiliary_variable(scale, name="scale")
+    def crop(self, x, x_shape, raw_location, raw_scale):
+        self.add_auxiliary_variable(raw_location, name="raw_location")
+        self.add_auxiliary_variable(raw_scale, name="raw_scale")
+        true_location, true_scale = self.map_to_input_space(
+            x_shape, raw_location, raw_scale)
         self.add_auxiliary_variable(true_location, name="true_location")
         self.add_auxiliary_variable(true_scale, name="true_scale")
+        patch = self.cropper.apply(x, x_shape, true_location, true_scale)
         self.add_auxiliary_variable(patch, name="patch")
         return patch
 
