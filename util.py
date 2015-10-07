@@ -161,16 +161,23 @@ def tag_for_replacement(variable, replacement, key):
     return variable
 
 def replace_by_tags(variables, keys):
-    def maybe_replace_one(variable):
-        # do replacements in order specified by `keys`
+    def maybe_replace_one_once(variable):
         for key in keys:
-            if not hasattr(variable.tag, "replacements"):
-                return variable
             if key in variable.tag.replacements:
                 replacement = variable.tag.replacements[key]
                 logger.warning("replace_by_tags: %s: %s -> %s"
                                % (key, variable, replacement))
-                variable = replacement
+                return replacement
+        return variable
+    def maybe_replace_one(variable):
+        while hasattr(variable.tag, "replacements"):
+            replacement = maybe_replace_one_once(variable)
+            if replacement is variable:
+                break
+            variable = replacement
+        assert (not hasattr(variable.tag, "replacements") or
+                not any(key in variable.tag.replacements
+                        for key in keys))
         return variable
     return map_variables(maybe_replace_one, variables)
 
