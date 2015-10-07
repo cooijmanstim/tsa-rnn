@@ -39,7 +39,7 @@ class SingleSoftmax(bricks.Initializable):
         cross_entropy = self.softmax.categorical_cross_entropy(
             y.flatten(), energy).mean(axis=0)
         error_rate = T.neq(y, energy.argmax(axis=1)).mean(axis=0)
-        cost = util.named(cross_entropy, "cost")
+        cost = cross_entropy.copy(name="cost")
         self.add_auxiliary_variable(cross_entropy, name="cross_entropy")
         self.add_auxiliary_variable(error_rate, name="error_rate")
         return cost

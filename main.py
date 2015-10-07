@@ -54,9 +54,9 @@ def construct_monitors(algorithm, task, n_patches, x, x_shape, graphs,
 
     if True:
         step_norms = util.Channels()
-        step_norms.extend(util.named(l2_norm([algorithm.steps[param]]),
-                                     "%s.step_norm" % name)
-                          for name, param in model.get_parameter_dict().items())
+        step_norms.extend(
+            l2_norm([algorithm.steps[param]]).copy(name="%s.step_norm" % name)
+            for name, param in model.get_parameter_dict().items())
         step_channels = step_norms.get_channels()
 
         extensions.append(TrainingDataMonitoring(
@@ -88,7 +88,7 @@ def construct_monitors(algorithm, task, n_patches, x, x_shape, graphs,
             "location scale true_location true_scale savings".split(),
              graph, n_patches)
 
-        channels.append(util.named(savings.mean(), "savings.mean"))
+        channels.append(savings.mean().copy(name="savings.mean"))
 
         for variable_name in "location scale".split():
             variable = locals()[variable_name]

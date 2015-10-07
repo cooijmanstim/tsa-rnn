@@ -1,14 +1,20 @@
-import logging
-logger = logging.getLogger(__name__)
-
-import operator
+import sys, operator, logging
 import itertools as it
 import numbers
-from theano.compile import ViewOp
-from collections import OrderedDict
-from blocks.initialization import NdarrayInitialization
 
+from collections import OrderedDict
+from cStringIO import StringIO
+import numpy as np
+
+import theano.tensor.basic
+import theano.sandbox.cuda.blas
+import theano.printing
+from theano.scan_module.scan_utils import equal_computations
 import theano.tensor as T
+
+from blocks.filter import VariableFilter
+
+logger = logging.getLogger(__name__)
 
 def broadcast_index(index, axes, ndim):
     dimshuffle_args = ['x'] * ndim
@@ -27,22 +33,6 @@ def broadcast_indices(index_specs, ndim):
 def subtensor(x, index_specs):
     indices = broadcast_indices(index_specs, x.ndim)
     return x[tuple(indices)]
-
-class WithDifferentiableApproximation(ViewOp):
-    __props__ = ()
-
-    def make_node(self, fprop_output, bprop_output):
-        # avoid theano wasting time computing the gradient of fprop_output
-        fprop_output = theano.gradient.disconnected_grad(fprop_output)
-        return gof.Apply(self, [fprop_output, bprop_output], [f.type()])
-
-    def grad(self, wrt, input_gradients):
-        import pdb; pdb.set_trace()
-        # check that we need input_gradients[1] rather than input_gradients[:][1]
-        return input_gradients[1]
-
-def with_differentiable_approximation(fprop_output, bprop_output):
-    return WithDifferentiableApproximation()(fprop_output, bprop_output)
 
 # to handle non-unique monitoring channels without crashing and
 # without silent loss of information
@@ -71,20 +61,7 @@ class Channels(object):
                                                   % (quantity.name, i)))
         return channels
 
-def dict_merge(*dikts):
-    result = OrderedDict()
-    for dikt in dikts:
-        result.update(dikt)
-    return result
-
-def named(x, name):
-    x.name = name
-    return x
-
 # from http://stackoverflow.com/a/16571630
-from cStringIO import StringIO
-import sys
-
 class StdoutLines(list):
     def __enter__(self):
         self._stringio = StringIO()
@@ -96,19 +73,12 @@ class StdoutLines(list):
         self.extend(self._stringio.getvalue().splitlines())
         sys.stdout = self._stdout
 
-import theano.tensor.basic
-import theano.sandbox.cuda.blas
 
 def batched_tensordot(a, b, axes=2):
     return theano.tensor.basic._tensordot_as_dot(
         a, b, axes,
         dot=theano.sandbox.cuda.blas.batched_dot,
         batched=True)
-
-import theano.printing
-from blocks.filter import VariableFilter
-import numpy as np
-from theano.scan_module.scan_utils import equal_computations
 
 def dedup(xs, equal=operator.is_):
     ys = []
