@@ -186,7 +186,7 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
     graphs["test"] = get_inference_graph(cost, **hyperparameters)
     graphs["valid"] = graphs["test"]
 
-    uselessflunky = Model(cost)
+    uselessflunky = Model(graphs["train"].outputs[0])
     algorithm = GradientDescent(
         cost=graphs["train"].outputs[0],
         parameters=graphs["train"].parameters,
