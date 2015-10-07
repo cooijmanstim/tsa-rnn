@@ -1,22 +1,11 @@
-import operator
-from collections import OrderedDict
 import logging
-
-logger = logging.getLogger(__name__)
-
 import numpy as np
 import theano
 import theano.tensor as T
+from blocks.bricks.base import application
+import util, bricks, initialization, masonry
 
-from blocks.bricks.base import application, Brick
-from blocks.bricks import Initializable
-
-import bricks
-import initialization
-
-import masonry
-import util
-
+logger = logging.getLogger(__name__)
 floatX = theano.config.floatX
 
 # this belongs on RecurrentAttentionModel as a static method, but that breaks pickling

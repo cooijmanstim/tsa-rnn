@@ -1,33 +1,16 @@
-import yaml
-import os
-import logging
+import os, logging, yaml
 from collections import OrderedDict
-
-import numpy as np
-
 import theano
 import theano.tensor as T
-import theano.sandbox.rng_mrg
-
+from blocks.graph import ComputationGraph
 from blocks.model import Model
 from blocks.algorithms import GradientDescent, RMSProp, Adam, CompositeRule, StepClipping
+from blocks.main_loop import MainLoop
+from blocks.extensions import FinishAfter, Printing, ProgressBar, Timing
 from blocks.extensions.training import SharedVariableModifier
 from blocks.extensions.monitoring import TrainingDataMonitoring, DataStreamMonitoring
 from blocks.extensions.saveload import Checkpoint
-from blocks.main_loop import MainLoop
-from blocks.extensions import FinishAfter, Printing, ProgressBar, Timing
-from blocks.roles import OUTPUT
-from blocks.graph import ComputationGraph
-from blocks.filter import VariableFilter
-from blocks.theano_expressions import l2_norm
-
-import util
-import bricks
-import initialization
-import masonry
-import attention
-import crop
-import tasks
+import util, attention, crop, tasks
 from patchmonitor import PatchMonitoring, VideoPatchMonitoring
 from dump import Dump, DumpMinimum, PrintingTo, load_model_parameters
 
@@ -55,7 +38,7 @@ def construct_monitors(algorithm, task, n_patches, x, x_shape, graphs,
     if True:
         step_norms = util.Channels()
         step_norms.extend(
-            l2_norm([algorithm.steps[param]]).copy(name="%s.step_norm" % name)
+            algorithm.steps[param].norm(2).copy(name="%s.step_norm" % name)
             for name, param in model.get_parameter_dict().items())
         step_channels = step_norms.get_channels()
 

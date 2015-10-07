@@ -1,15 +1,10 @@
-import collections
-import logging
-
-logger = logging.getLogger(__name__)
-
+import logging, collections
 import numpy as np
-
+import bricks, initialization
 import blocks.bricks.conv as conv2d
 import conv3d
 
-import bricks
-import initialization
+logger = logging.getLogger(__name__)
 
 def construct_cnn_layer(name, layer_spec, conv_module, ndim, batch_normalize):
     type_ = layer_spec.pop("type", "conv")
