@@ -7,13 +7,16 @@ import transformers
 import datasets
 
 rng = np.random.RandomState(0)
-def random_crops((videos, targets)):
+def augment((videos, targets)):
     mintime = min(len(video) for video in videos)
     crop_shape = np.array([mintime, 100, 140])
     offsets = [[rng.randint(0, dim + 1) for dim in video.shape - crop_shape]
                for video in videos]
-    videos = [video[tuple(slice(i, i + k)
-                          for i, k in zip(offset, crop_shape))]
+    videos = [(video
+               [tuple(slice(i, i + k)
+                      for i, k in zip(offset, crop_shape))]
+               # flip horizontal dimension half the time
+               [:, :, ::np.choice([-1, 1])])
               for video, offset in zip(videos, offsets)]
     return videos, targets
 
@@ -33,9 +36,9 @@ class Task(tasks.Classification):
             for which_set in "train valid test".split())
 
     def apply_default_transformers(self, stream):
-        # FIXME: don't randomcrop on valid/test
+        # FIXME: don't augment on valid/test
         stream = fuel.transformers.Mapping(
-            stream, mapping=random_crops)
+            stream, mapping=augment)
         stream = transformers.PaddingShape(
             stream, shape_sources=["videos"])
         return stream
