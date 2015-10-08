@@ -16,7 +16,7 @@ def augment((videos, targets)):
                [tuple(slice(i, i + k)
                       for i, k in zip(offset, crop_shape))]
                # flip horizontal dimension half the time
-               [:, :, ::np.choice([-1, 1])])
+               [:, :, ::np.random.choice([-1, 1])])
               for video, offset in zip(videos, offsets)]
     return videos, targets
 
