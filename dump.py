@@ -21,59 +21,15 @@ class PrintingTo(Printing):
             f.write("\n")
 
 class DumpBest(SimpleExtension):
-    """Check if a log quantity has the minimum/maximum value so far.
-
-    Parameters
-    ----------
-    record_name : str
-        The name of the record to track.
-    notification_name : str, optional
-        The name for the record to be made in the log when the current
-        value of the tracked quantity is the best so far. It not given,
-        'record_name' plus "best_so_far" suffix is used.
-    choose_best : callable, optional
-        A function that takes the current value and the best so far
-        and return the best of two. By default :func:`min`, which
-        corresponds to tracking the minimum value.
-
-    Attributes
-    ----------
-    best_name : str
-        The name of the status record to keep the best value so far.
-    notification_name : str
-        The name of the record written to the log when the current
-        value of the tracked quantity is the best so far.
-
-    Notes
-    -----
-    In the likely case that you are relying on another extension to
-    add the tracked quantity to the log, make sure to place this
-    extension *after* the extension that writes the quantity to the log
-    in the `extensions` argument to :class:`blocks.main_loop.MainLoop`.
-
-    """
-    def __init__(self, record_name, save_path, notification_name=None,
-                 choose_best=min, **kwargs):
-        self.record_name = record_name
-        if not notification_name:
-            notification_name = record_name + "_best_so_far"
+    """dump if the `notification_name` record is present"""
+    def __init__(self, notification_name, save_path, **kwargs):
         self.notification_name = notification_name
-        self.best_name = "best_" + record_name
-        self.choose_best = choose_best
         self.save_path = save_path
         kwargs.setdefault("after_epoch", True)
         super(DumpBest, self).__init__(**kwargs)
 
     def do(self, which_callback, *args):
-        current_value = self.main_loop.log.current_row.get(self.record_name)
-        if current_value is None:
-            return
-        best_value = self.main_loop.status.get(self.best_name, None)
-        if (best_value is None or
-            (current_value != best_value and
-             self.choose_best(current_value, best_value) == current_value)):
-            self.main_loop.status[self.best_name] = current_value
-            self.main_loop.log.current_row[self.notification_name] = True
+        if self.notification_name in self.main_loop.log.current_row:
             secure_dump(self.main_loop, self.save_path, dump_main_loop)
 
 class LightCheckpoint(SimpleExtension):

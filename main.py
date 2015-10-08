@@ -142,8 +142,9 @@ def get_inference_graph(cost, **kwargs):
 
 @util.checkargs
 def construct_main_loop(name, task_name, patch_shape, batch_size,
-                        n_spatial_dims, n_patches, n_epochs,
-                        learning_rate, hyperparameters, **kwargs):
+                        n_spatial_dims, n_patches, max_epochs,
+                        patience_epochs, learning_rate,
+                        hyperparameters, **kwargs):
     name = "%s_%s" % (name, task_name)
     hyperparameters["name"] = name
 
@@ -197,9 +198,11 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
         algorithm=algorithm, task=task, model=uselessflunky, ram=ram,
         graphs=graphs, **hyperparameters))
     extensions.extend([
-        FinishAfter(after_n_epochs=n_epochs),
-        dump.DumpBest('valid_error_rate', name+'_best.zip'),
-        dump.LightCheckpoint(name+'_checkpoint.zip', on_interrupt=False),
+        TrackTheBest("valid_error_rate", "best_valid_error_rate"),
+        FinishIfNoImprovementAfter("best_valid_error_rate", epochs=patience_epochs),
+        FinishAfter(after_n_epochs=max_epochs),
+        dump.DumpBest("best_valid_error_rate", name+"_best.zip"),
+        dump.LightCheckpoint(name+"_checkpoint.zip", on_interrupt=False),
         ProgressBar(),
         Timing(),
         Printing(),

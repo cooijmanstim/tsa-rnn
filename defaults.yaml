@@ -2,7 +2,8 @@ name: "attention_rnn"
 task_name: "svhn_digit"
 patchmonitor_interval: 100
 shrink_dataset_by: 1
-n_epochs: 100
+patience_epochs: 100
+max_epochs: 500
 batch_size: 100
 hidden_dim: 256
 response_dim: 128
