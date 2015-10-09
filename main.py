@@ -114,7 +114,7 @@ def construct_monitors(algorithm, task, n_patches, x, x_shape, graphs,
         for which in "train valid".split():
             patchmonitor = patchmonitor_klass(
                 save_to="%s_patches_%s" % (name, which),
-                data_stream=task.get_stream(which, shuffle=False, num_examples=5),
+                data_stream=task.get_stream(which, shuffle=False, num_examples=10),
                 every_n_batches=patchmonitor_interval,
                 extractor=patch_extractor,
                 map_to_input_space=attention.static_map_to_input_space)
