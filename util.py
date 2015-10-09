@@ -206,3 +206,6 @@ def checkargs(f):
                     raise type, (message,), traceback
             raise
     return g
+
+def rectify(x):
+    return (x > 0)*x

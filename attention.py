@@ -222,7 +222,14 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
         return patch
 
     def map_to_input_space(self, image_shape, location, scale):
-        return static_map_to_input_space(
-            location, scale,
-            T.cast(self.cropper.patch_shape, floatX),
-            T.cast(image_shape, floatX))
+        patch_shape = T.cast(self.cropper.patch_shape, floatX)
+        image_shape = T.cast(image_shape, floatX)
+        location, scale = static_map_to_input_space(
+            location, scale, patch_shape, image_shape)
+        # if the patch does not overlap with the image, this measures
+        # the gap (in each dimension)
+        excursion = sum((
+            util.rectify(-location - patch_shape / scale),
+            util.rectify( location - patch_shape / scale - image_shape)))
+        self.add_auxiliary_variable(excursion, name="excursion")
+        return location, scale

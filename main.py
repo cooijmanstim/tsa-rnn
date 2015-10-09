@@ -4,6 +4,7 @@ import theano
 import theano.tensor as T
 from blocks.graph import ComputationGraph
 from blocks.model import Model
+from blocks.filter import VariableFilter
 from blocks.algorithms import GradientDescent, RMSProp, Adam, CompositeRule, StepClipping
 from blocks.main_loop import MainLoop
 from blocks.extensions import FinishAfter, Printing, ProgressBar, Timing
@@ -74,6 +75,10 @@ def construct_monitors(algorithm, task, n_patches, x, x_shape, graphs,
             "savings".split(), graph, n_patches)
 
         channels.append(savings.mean().copy(name="savings.mean"))
+
+        [excursion_cost] = [var for var in graph.variables
+                        if var.name == "excursion_cost"]
+        channels.append(excursion_cost)
 
         for variable_name in "raw_location raw_scale".split():
             variable = locals()[variable_name]
@@ -179,7 +184,14 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
         input_dim=ram.get_dim("states"),
         **hyperparameters)
     emitter.initialize()
-    cost = emitter.cost(states[-1]["states"], y, n_patches)
+    emitter_cost = emitter.cost(states[-1]["states"], y, n_patches)
+
+    [excursion] = util.get_recurrent_auxiliaries(
+        ["excursion"], ComputationGraph(emitter_cost), n_patches)
+    excursion_cost = (excursion**2).sum(axis=[1, 2]).mean(axis=0)
+    excursion_cost.name = "excursion_cost"
+
+    cost = emitter_cost + excursion_cost
     cost.name = "cost"
 
     print "setting up main loop..."
