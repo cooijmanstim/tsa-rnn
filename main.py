@@ -7,7 +7,8 @@ from blocks.model import Model
 from blocks.algorithms import GradientDescent, RMSProp, Adam, CompositeRule, StepClipping
 from blocks.main_loop import MainLoop
 from blocks.extensions import FinishAfter, Printing, ProgressBar, Timing
-from blocks.extensions.training import SharedVariableModifier
+from blocks.extensions.stopping import FinishIfNoImprovementAfter
+from blocks.extensions.training import SharedVariableModifier, TrackTheBest
 from blocks.extensions.monitoring import TrainingDataMonitoring, DataStreamMonitoring
 from blocks.extensions.saveload import Checkpoint
 import util, attention, crop, tasks, dump
