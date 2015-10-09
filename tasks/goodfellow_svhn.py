@@ -1,5 +1,5 @@
 # SVHN number transcription as in http://arxiv.org/pdf/1312.6082v4.pdf
-import os
+import os, itertools, logging
 
 import numpy as np
 
@@ -8,6 +8,8 @@ import theano.tensor as T
 
 from blocks.bricks.base import application
 from blocks.filter import VariableFilter
+from blocks import roles
+import blocks.graph
 
 from fuel.transformers import Mapping
 from fuel.datasets import H5PYDataset
@@ -17,6 +19,8 @@ import initialization
 
 import tasks
 import masonry
+
+logger = logging.getLogger(__name__)
 
 class SVHN(H5PYDataset):
     def __init__(self, **kwargs):
@@ -85,7 +89,7 @@ class Emitter(bricks.Initializable):
         logprobs = [self.softmax.log_probabilities(emitter.apply(x))
                     for emitter in self.emitters]
         mean_cross_entropy = compute_mean_cross_entropy(y, logprobs)
-        mean_error_rate = compute_error_rate(y, logprobs)
+        error_rate = compute_error_rate(y, logprobs)
 
         self.add_auxiliary_variable(mean_cross_entropy, name="cross_entropy")
         self.add_auxiliary_variable(error_rate, name="error_rate")
@@ -94,9 +98,17 @@ class Emitter(bricks.Initializable):
         return cost
 
     def apply_dropout(self, graph, dropout):
-        # TODO: figure out how to drop out the various mlps without
-        # dropping out the input more than once
-        raise NotImplementedError()
+        dropout_variables = (
+            VariableFilter(
+                roles=[roles.INPUT],
+                bricks=list(itertools.chain.from_iterable(
+                    [brick for brick in mlp.children
+                     if isinstance(brick, bricks.Linear)]
+                    for mlp in self.emitters)))
+            (graph.variables))
+        logger.warning("dropping out %s" % dropout_variables)
+        return blocks.graph.apply_dropout(
+            graph, dropout_variables, dropout)
 
 class NumberTask(tasks.Classification):
     name = "svhn_number"
