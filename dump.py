@@ -34,6 +34,7 @@ class DumpBest(SimpleExtension):
 
 class LightCheckpoint(SimpleExtension):
     def __init__(self, save_path, **kwargs):
+        kwargs.setdefault("after_epoch", True)
         super(LightCheckpoint, self).__init__(**kwargs)
         self.save_path = save_path
 
