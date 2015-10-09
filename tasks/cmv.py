@@ -33,8 +33,9 @@ class Task(tasks.Classification):
 
     def preprocess(self, data):
         x, y = data
+        x = np.asarray(x)
         # introduce channel axis
-        x = x[:, np.newaxis, ...]
+        x = np.expand_dims(x, axis=1)
         x_shape = np.tile([x.shape[2:]], (x.shape[0], 1))
         return (x.astype(np.float32),
                 x_shape.astype(np.float32),
