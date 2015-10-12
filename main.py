@@ -3,8 +3,10 @@ from collections import OrderedDict
 import theano
 import theano.tensor as T
 from blocks.graph import ComputationGraph
+import blocks.graph
 from blocks.model import Model
 from blocks.filter import VariableFilter
+from blocks import roles
 from blocks.algorithms import GradientDescent, RMSProp, Adam, CompositeRule, StepClipping
 from blocks.main_loop import MainLoop
 from blocks.extensions import FinishAfter, Printing, ProgressBar, Timing
@@ -134,17 +136,30 @@ def construct_monitors(algorithm, task, n_patches, x, x_shape, graphs,
     return extensions
 
 @util.checkargs
-def get_training_graph(cost, emitter, dropout, **kwargs):
+def get_training_graph(cost, dropout, recurrent_weight_noise,
+                       ram, emitter, **kwargs):
     [cost] = util.replace_by_tags(
         [cost], "location_noise scale_noise".split())
     graph = ComputationGraph(cost)
     if dropout > 0.0:
         graph = emitter.apply_dropout(graph, dropout)
+    if recurrent_weight_noise > 0.0:
+        variables = (VariableFilter(bricks=ram.rnn.children,
+                                    roles=[roles.WEIGHT])
+                     (graph.parameters))
+        assert variables
+        graph = blocks.graph.apply_noise(
+            graph, variables, recurrent_weight_noise)
     return graph
 
 @util.checkargs
 def get_inference_graph(cost, **kwargs):
     return ComputationGraph(cost)
+
+graph_constructors = dict(
+    train=get_training_graph,
+    valid=get_inference_graph,
+    test=get_inference_graph)
 
 @util.checkargs
 def construct_main_loop(name, task_name, patch_shape, batch_size,
@@ -195,10 +210,10 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
     cost.name = "cost"
 
     print "setting up main loop..."
-    graphs = OrderedDict()
-    graphs["train"] = get_training_graph(cost, emitter=emitter, **hyperparameters)
-    graphs["test"] = get_inference_graph(cost, **hyperparameters)
-    graphs["valid"] = graphs["test"]
+    graphs = OrderedDict(
+        (which_set, graph_constructors[which_set](
+            cost, ram=ram, emitter=emitter, **hyperparameters))
+        for which_set in "train valid test".split())
 
     uselessflunky = Model(graphs["train"].outputs[0])
     algorithm = GradientDescent(

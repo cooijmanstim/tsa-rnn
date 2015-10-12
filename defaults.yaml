@@ -33,6 +33,7 @@ location_std_decay: 0.999
 scale_std: 0.01
 scale_std_decay: 0.999
 dropout: 0.8
+recurrent_weight_noise: 0.001
 batch_normalize: False
 batch_normalize_patch: True
 plot_url: null
