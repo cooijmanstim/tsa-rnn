@@ -9,7 +9,7 @@ import numpy as np
 import theano.tensor.basic
 import theano.sandbox.cuda.blas
 import theano.printing
-from theano.scan_module.scan_utils import equal_computations
+import theano.scan_module.scan_utils
 import theano.tensor as T
 
 from blocks.filter import VariableFilter
@@ -87,6 +87,10 @@ def dedup(xs, equal=operator.is_):
             ys.append(x)
     return ys
 
+# for use with dedup
+def equal_computations(a, b):
+    return theano.scan_module.scan_utils.equal_computations([a], [b])
+
 def get_recurrent_auxiliaries(names, graph, n_steps=None, require_in_graph=False):
     if require_in_graph:
         # ComputationGraph.auxiliary_variables includes auxiliaries
@@ -99,7 +103,7 @@ def get_recurrent_auxiliaries(names, graph, n_steps=None, require_in_graph=False
         steps = VariableFilter(name=name)(graph.auxiliary_variables)
         if require_in_graph:
             steps = [step for step in steps if step in all_variables]
-        steps = dedup(steps, equal=lambda a, b: equal_computations([a], [b]))
+        steps = dedup(steps, equal=equal_computations)
 
         if n_steps is not None:
             assert len(steps) == n_steps
@@ -147,8 +151,6 @@ def get_path(x):
     else:
         raise TypeError()
 
-from theano.scan_module.scan_utils import map_variables
-
 def tag_for_replacement(variable, replacement, key):
     # copy `variable` so that only the copy has the tag and any
     # appearances of `variable` in `replacement` do not (or
@@ -181,7 +183,8 @@ def replace_by_tags(variables, keys):
                 not any(key in variable.tag.replacements
                         for key in keys))
         return variable
-    return map_variables(maybe_replace_one, variables)
+    return theano.scan_module.scan_utils.map_variables(
+        maybe_replace_one, variables)
 
 # decorator to improve python's terrible argument error reporting
 def checkargs(f):
