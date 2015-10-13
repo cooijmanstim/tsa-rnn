@@ -136,13 +136,17 @@ def construct_monitors(algorithm, task, n_patches, x, x_shape, graphs,
     return extensions
 
 @util.checkargs
-def get_training_graph(cost, dropout, recurrent_weight_noise,
-                       ram, emitter, **kwargs):
+def get_training_graph(cost, dropout, attention_dropout, recurrent_dropout,
+                       recurrent_weight_noise, ram, emitter, **kwargs):
     [cost] = util.replace_by_tags(
         [cost], "location_noise scale_noise".split())
     graph = ComputationGraph(cost)
     if dropout > 0.0:
         graph = emitter.apply_dropout(graph, dropout)
+    if recurrent_dropout > 0.0:
+        graph = ram.apply_recurrent_dropout(graph, recurrent_dropout)
+    if attention_dropout > 0.0:
+        graph = ram.apply_attention_dropout(graph, attention_dropout)
     if recurrent_weight_noise > 0.0:
         variables = (VariableFilter(bricks=ram.rnn.children,
                                     roles=[roles.WEIGHT])

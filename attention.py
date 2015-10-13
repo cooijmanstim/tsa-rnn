@@ -1,8 +1,9 @@
-import logging
+import logging, itertools
 import numpy as np
 import theano
 import theano.tensor as T
 from blocks.bricks.base import application
+import blocks.graph, blocks.filter, blocks.roles
 import util, bricks, initialization, masonry
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,46 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
         # states aren't known until now
         self.apply.outputs = self.rnn.apply.outputs
         self.compute_initial_state.outputs = self.rnn.apply.outputs
+
+    def apply_recurrent_dropout(self, graph, dropout):
+        replacements = []
+        for i, lstm in enumerate(self.rnn.transitions):
+            variables = (
+                blocks.filter.VariableFilter(
+                    roles=[blocks.roles.INPUT], bricks=[lstm])
+                (theano.gof.graph.ancestors(graph.outputs)))
+            variables = list(set(variables))
+            variables = [var for var in variables
+                         if var.name.endswith("states")]
+            mask = (theano.sandbox.rng_mrg.MRG_RandomStreams(1 + i)
+                    .binomial(variables[0].shape,
+                              p=1 - dropout,
+                              dtype=theano.config.floatX) /
+                    (1 - dropout))
+            replacements.extend((variable, mask) for variable in variables)
+            logger.warning("dropping out %s with equal mask" % variables)
+        for variable, replacement in replacements:
+            blocks.roles.add_role(replacement, blocks.roles.DROPOUT)
+            replacement.tag.replacement_of = variable
+        return graph.replace(replacements)
+
+    def apply_attention_dropout(self, graph, dropout):
+        variables = (
+            blocks.filter.VariableFilter(
+                roles=[blocks.roles.INPUT],
+                bricks=([self.embedder, self.theta_from_area] +
+                        [brick for brick in itertools.chain.from_iterable(
+                            map(util.deep_children_of,
+                                (self.patch_transform,
+                                 self.locate_mlp,
+                                 self.response_merge,
+                                 self.response_mlp)))
+                         if isinstance(brick, bricks.Linear)]))
+            (theano.gof.graph.ancestors(graph.outputs)))
+        variables = list(set(variables))
+        logger.warning("dropping out %s" % variables)
+        return blocks.graph.apply_dropout(
+            graph, variables, dropout)
 
     @util.checkargs
     def construct_merger(self, n_spatial_dims, n_channels,
