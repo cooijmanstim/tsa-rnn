@@ -59,29 +59,9 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
         self.apply.outputs = self.rnn.apply.outputs
         self.compute_initial_state.outputs = self.rnn.apply.outputs
 
-    def apply_recurrent_dropout(self, graph, dropout):
-        replacements = []
-        for i, lstm in enumerate(self.rnn.transitions):
-            variables = (
-                blocks.filter.VariableFilter(
-                    roles=[blocks.roles.INPUT], bricks=[lstm])
-                (theano.gof.graph.ancestors(graph.outputs)))
-            variables = list(set(variables))
-            variables = [var for var in variables
-                         if var.name.endswith("states")]
-            mask = (theano.sandbox.rng_mrg.MRG_RandomStreams(1 + i)
-                    .binomial(variables[0].shape,
-                              p=1 - dropout,
-                              dtype=theano.config.floatX) /
-                    (1 - dropout))
-            replacements.extend((variable, mask) for variable in variables)
-            logger.warning("dropping out %s with equal mask" % variables)
-        for variable, replacement in replacements:
-            blocks.roles.add_role(replacement, blocks.roles.DROPOUT)
-            replacement.tag.replacement_of = variable
-        return graph.replace(replacements)
-
-    def apply_attention_dropout(self, graph, dropout):
+    def apply_attention_dropout(self, graph, amount):
+        if amount <= 0:
+            return graph
         variables = (
             blocks.filter.VariableFilter(
                 roles=[blocks.roles.INPUT],
@@ -95,9 +75,43 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
                          if isinstance(brick, bricks.Linear)]))
             (theano.gof.graph.ancestors(graph.outputs)))
         variables = list(set(variables))
-        logger.warning("dropping out %s" % variables)
+        logger.warning("%3.2f dropping out %s" % (amount, variables))
         return blocks.graph.apply_dropout(
-            graph, variables, dropout)
+            graph, variables, amount)
+
+    def apply_recurrent_dropout(self, graph, amount):
+        if amount <= 0:
+            return graph
+        replacements = []
+        for i, lstm in enumerate(self.rnn.transitions):
+            variables = (
+                blocks.filter.VariableFilter(
+                    roles=[blocks.roles.INPUT], bricks=[lstm])
+                (theano.gof.graph.ancestors(graph.outputs)))
+            variables = list(set(variables))
+            variables = [var for var in variables
+                         if var.name.endswith("states")]
+            mask = (theano.sandbox.rng_mrg.MRG_RandomStreams(1 + i)
+                    .binomial(variables[0].shape,
+                              p=1 - amount,
+                              dtype=theano.config.floatX) /
+                    (1 - amount))
+            replacements.extend((variable, mask) for variable in variables)
+            logger.warning("%3.2f dropping out %s with equal mask" % (amount, variables))
+        for variable, replacement in replacements:
+            blocks.roles.add_role(replacement, blocks.roles.DROPOUT)
+            replacement.tag.replacement_of = variable
+        return graph.replace(replacements)
+
+    def apply_recurrent_weight_noise(self, graph, amount):
+        if amount <= 0:
+            return graph
+        variables = (VariableFilter(bricks=self.rnn.children,
+                                    roles=[roles.WEIGHT])
+                     (graph.parameters))
+        logger.warning("applying %3.2f gaussian noise to %s" % (amount, variables))
+        return blocks.graph.apply_noise(
+            graph, variables, amount)
 
     @util.checkargs
     def construct_merger(self, n_spatial_dims, n_channels,

@@ -6,6 +6,7 @@ from collections import OrderedDict
 from cStringIO import StringIO
 import numpy as np
 
+import theano
 import theano.tensor.basic
 import theano.sandbox.cuda.blas
 import theano.printing
@@ -221,3 +222,6 @@ def deep_children_of(parent):
         bricks.append(brick)
         fringe.extend(brick.children)
     return bricks
+
+def graph_size(variable_list):
+    return len(set(theano.gof.graph.ancestors(variable_list)))

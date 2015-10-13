@@ -97,8 +97,10 @@ class Emitter(bricks.Initializable):
         cost = mean_cross_entropy
         return cost
 
-    def apply_dropout(self, graph, dropout):
-        dropout_variables = (
+    def apply_dropout(self, graph, amount):
+        if amount <= 0:
+            return graph
+        variables = (
             VariableFilter(
                 roles=[roles.INPUT],
                 bricks=list(itertools.chain.from_iterable(
@@ -106,9 +108,9 @@ class Emitter(bricks.Initializable):
                      if isinstance(brick, bricks.Linear)]
                     for mlp in self.emitters)))
             (graph.variables))
-        logger.warning("dropping out %s" % dropout_variables)
+        logger.warning("%3.2f dropping out %s" % (amount, variables))
         return blocks.graph.apply_dropout(
-            graph, dropout_variables, dropout)
+            graph, variables, amount)
 
 class NumberTask(tasks.Classification):
     name = "svhn_number"

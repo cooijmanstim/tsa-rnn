@@ -44,13 +44,15 @@ class SingleSoftmax(bricks.Initializable):
         self.add_auxiliary_variable(error_rate, name="error_rate")
         return cost
 
-    def apply_dropout(self, graph, dropout):
-        dropout_variables = (
+    def apply_dropout(self, graph, amount):
+        if amount <= 0:
+            return graph
+        variables = (
             filter.VariableFilter(
                 roles=[roles.INPUT],
                 bricks=[brick for brick in self.mlp.children
                         if isinstance(brick, bricks.Linear)])
             (graph.variables))
-        logger.warning("dropping out %s" % dropout_variables)
+        logger.warning("dropping out %s" % variables)
         return blocks.graph.apply_dropout(
-            graph, dropout_variables, dropout)
+            graph, variables, amount)

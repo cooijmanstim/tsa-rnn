@@ -17,6 +17,10 @@ from blocks.extensions.saveload import Checkpoint
 import util, attention, crop, tasks, dump
 from patchmonitor import PatchMonitoring, VideoPatchMonitoring
 
+# disable cached constants. this keeps the graph from ballooning with
+# map_variables.
+T.constant.enable = False
+
 floatX = theano.config.floatX
 
 @util.checkargs
@@ -138,22 +142,20 @@ def construct_monitors(algorithm, task, n_patches, x, x_shape, graphs,
 @util.checkargs
 def get_training_graph(cost, dropout, attention_dropout, recurrent_dropout,
                        recurrent_weight_noise, ram, emitter, **kwargs):
+    logger.warning("%i variables in graph" % util.graph_size([cost]))
     [cost] = util.replace_by_tags(
         [cost], "location_noise scale_noise".split())
+    logger.warning("%i variables in graph" % util.graph_size([cost]))
     graph = ComputationGraph(cost)
-    if dropout > 0.0:
-        graph = emitter.apply_dropout(graph, dropout)
-    if recurrent_dropout > 0.0:
-        graph = ram.apply_recurrent_dropout(graph, recurrent_dropout)
-    if attention_dropout > 0.0:
-        graph = ram.apply_attention_dropout(graph, attention_dropout)
-    if recurrent_weight_noise > 0.0:
-        variables = (VariableFilter(bricks=ram.rnn.children,
-                                    roles=[roles.WEIGHT])
-                     (graph.parameters))
-        assert variables
-        graph = blocks.graph.apply_noise(
-            graph, variables, recurrent_weight_noise)
+    logger.warning("%i variables in graph" % util.graph_size(graph.outputs))
+    graph = emitter.apply_dropout(graph, dropout)
+    logger.warning("%i variables in graph" % util.graph_size(graph.outputs))
+    graph = ram.apply_attention_dropout(graph, attention_dropout)
+    logger.warning("%i variables in graph" % util.graph_size(graph.outputs))
+    graph = ram.apply_recurrent_dropout(graph, recurrent_dropout)
+    logger.warning("%i variables in graph" % util.graph_size(graph.outputs))
+    graph = ram.apply_recurrent_weight_noise(graph, recurrent_weight_noise)
+    logger.warning("%i variables in graph" % util.graph_size(graph.outputs))
     return graph
 
 @util.checkargs
@@ -243,6 +245,10 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
                          algorithm=algorithm,
                          extensions=extensions,
                          model=uselessflunky)
+
+    with open("graph", "w") as graphfile:
+        theano.printing.debugprint(algorithm._function, graphfile)
+
     return main_loop
 
 if __name__ == "__main__":
