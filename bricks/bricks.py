@@ -1,5 +1,6 @@
 import operator
 
+import theano
 import theano.tensor as T
 
 from blocks.bricks.base import application, lazy
@@ -31,24 +32,21 @@ class NormalizedActivation(bricks.Initializable, bricks.Feedforward):
     def _allocate(self):
         arghs = dict(shape=self.shape,
                      broadcastable=self.broadcastable)
-        sequence = []
+        self.sequence = []
         if self.batch_normalize:
-            sequence.append(Standardization(**arghs))
-            sequence.append(SharedScale(
-                weights_init=initialization.Constant(1),
+            self.sequence.append(BatchNormalization(**arghs))
+        else:
+            self.sequence.append(SharedShift(
+                biases_init=initialization.Constant(0),
                 **arghs))
-        sequence.append(SharedShift(
-            biases_init=initialization.Constant(0),
-            **arghs))
-        sequence.append(self.activation)
-        self.sequence = bricks.FeedforwardSequence([
-            brick.apply for brick in sequence
-        ], name="ffs")
-        self.children = [self.sequence]
+        self.sequence.append(self.activation)
+        self.children = list(self.sequence)
 
-    @application(inputs=["input_"], outputs=["output"])
-    def apply(self, input_):
-        return self.sequence.apply(input_)
+    @application
+    def apply(self, x):
+        for brick in self.sequence:
+            x = brick.apply(x)
+        return x
 
     def get_dim(self, name):
         try:
@@ -153,33 +151,42 @@ class SharedShift(bricks.Initializable, bricks.Feedforward):
 
 # TODO: replacement of batch/population statistics by annotations
 # TODO: depends on replacements inside scan
-class Standardization(bricks.Initializable, bricks.Feedforward):
+class BatchNormalization(bricks.Initializable, bricks.Feedforward):
     stats = "mean var".split()
 
     def __init__(self, shape, broadcastable, alpha=1e-2, **kwargs):
-        super(Standardization, self).__init__(**kwargs)
+        super(BatchNormalization, self).__init__(**kwargs)
         self.shape = shape
-        self.broadcastable = broadcastable
+        self.broadcastable = list(broadcastable)
         self.alpha = alpha
 
     def _allocate(self):
-        parameter_shape = [1 if broadcast else dim
-                           for dim, broadcast in zip(self.shape, self.broadcastable)]
+        parameter_shape = [1] + [1 if broadcast else dim for dim, broadcast
+                                 in zip(self.shape, self.broadcastable)]
         self.population_stats = dict(
             (stat, shared_floatx_nans(parameter_shape,
                                       name="population_%s" % stat))
             for stat in self.stats)
+        self.gamma = shared_floatx_nans(parameter_shape, name='gamma')
+        self.beta = shared_floatx_nans(parameter_shape, name='beta')
+        add_role(self.gamma, WEIGHT)
+        add_role(self.beta, BIAS)
+        self.parameters.append(self.gamma)
+        self.parameters.append(self.beta)
 
     def _initialize(self):
-        for stat, initializer in (("mean", 0), ("var",  1)):
-            self.population_stats[stat].get_value().fill(initializer)
+        zero, one = initialization.Constant(0.), initialization.Constant(1.)
+        zero.initialize(self.population_stats["mean"], rng=self.rng)
+        one.initialize(self.population_stats["var"], rng=self.rng)
+        one.initialize(self.gamma, rng=self.rng)
+        zero.initialize(self.beta, rng=self.rng)
 
     @application(inputs=["input_"], outputs=["output"])
     def apply(self, input_):
         aggregate_axes = [0] + [1 + i for i, b in enumerate(self.broadcastable) if b]
         self.batch_stats = dict(
             (stat, getattr(input_, stat)(axis=aggregate_axes,
-                                         keepdims=True)[0])
+                                         keepdims=True))
             for stat in self.stats)
 
         # NOTE: these are unused for now
@@ -190,5 +197,9 @@ class Standardization(bricks.Initializable, bricks.Feedforward):
         self._replacements = [(self.batch_stats[stat], self.population_stats[stat])
                               for stat in self.stats]
 
-        return ((input_ - self.batch_stats["mean"])
-                / (T.sqrt(self.batch_stats["var"] + 1e-8)))
+        gamma = T.patternbroadcast(self.gamma, [True] + self.broadcastable)
+        beta = T.patternbroadcast(self.beta, [True] + self.broadcastable)
+        return theano.tensor.nnet.bn.batch_normalization(
+            inputs=input_, gamma=gamma, beta=beta,
+            mean=self.batch_stats["mean"],
+            std=T.sqrt(self.batch_stats["var"]) + 1e-8)
