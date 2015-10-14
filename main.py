@@ -246,8 +246,18 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
                          extensions=extensions,
                          model=uselessflunky)
 
-    with open("graph", "w") as graphfile:
-        theano.printing.debugprint(algorithm._function, graphfile)
+    # note blocks will crash and burn because it cannot deal with an
+    # already-initialized Algorithm, so this should be enabled only for
+    # debugging
+    if False:
+        with open("graph", "w") as graphfile:
+            algorithm.initialize()
+            theano.printing.debugprint(algorithm._function, file=graphfile)
+
+    from tabulate import tabulate
+    print "parameter sizes:"
+    print tabulate((key, value.get_value().size) for key, value in
+                   main_loop.model.get_parameter_dict().items())
 
     return main_loop
 
