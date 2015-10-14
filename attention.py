@@ -27,8 +27,8 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
         super(RecurrentAttentionModel, self).__init__(**kwargs)
 
         self.rnn = bricks.RecurrentStack(
-            [bricks.LSTM(activation=bricks.Tanh(), dim=hidden_dim),
-             bricks.LSTM(activation=bricks.Tanh(), dim=hidden_dim)],
+            [bricks.GatedRecurrent(activation=bricks.Tanh(), dim=hidden_dim),
+             bricks.GatedRecurrent(activation=bricks.Tanh(), dim=hidden_dim)],
             weights_init=initialization.NormalizedInitialization(
                 initialization.IsotropicGaussian()),
             biases_init=initialization.Constant(0))
@@ -43,7 +43,7 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
         self.embedder = bricks.Linear(
             name="embedder",
             input_dim=self.response_mlp.output_dim,
-            output_dim=4*self.rnn.get_dim("states"),
+            output_dim=self.rnn.get_dim("inputs") + self.rnn.get_dim("gate_inputs"),
             use_bias=True,
             weights_init=initialization.Orthogonal(),
             biases_init=initialization.Constant(1))
@@ -162,13 +162,41 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
             return super(RecurrentAttentionModel, self).get_dim(name)
 
     @application
+    def compute_initial_state(self, x, x_shape):
+        batch_size = x_shape.shape[0]
+        # condition on initial shrink-to-fit patch
+        raw_location = T.alloc(T.cast(0.0, floatX),
+                               batch_size, self.cropper.n_spatial_dims)
+        raw_scale = T.zeros_like(raw_location)
+        patch = self.crop(x, x_shape, raw_location, raw_scale)
+        states = self.rnn.initial_states(batch_size, as_dict=True)
+        return self.recur(self.merge(patch, raw_location, raw_scale), **states)
+
+    @application
     def apply(self, x, x_shape, **states):
-        location, scale = self.locate(states[self.attention_state_name])
-        patch = self.crop(x, x_shape, location, scale)
-        u = self.embedder.apply(self.merge(patch, location, scale))
-        states = self.rnn.apply(inputs=u, iterate=False, as_dict=True, **states)
+        raw_location, raw_scale = self.locate(states[self.attention_state_name])
+        patch = self.crop(x, x_shape, raw_location, raw_scale)
+        return self.recur(self.merge(patch, raw_location, raw_scale), **states)
+
+    def recur(self, merged, **states):
+        u = self.embedder.apply(merged)
+        hidden_dim = self.rnn.get_dim("inputs")
+        inputs, gate_inputs = u[:, :hidden_dim], u[:, hidden_dim:]
+        states = self.rnn.apply(inputs=inputs, gate_inputs=gate_inputs,
+                                iterate=False, as_dict=True, **states)
         return tuple(states.values())
-        
+
+    def crop(self, x, x_shape, raw_location, raw_scale):
+        self.add_auxiliary_variable(raw_location, name="raw_location")
+        self.add_auxiliary_variable(raw_scale, name="raw_scale")
+        true_location, true_scale = self.map_to_input_space(
+            x_shape, raw_location, raw_scale)
+        self.add_auxiliary_variable(true_location, name="true_location")
+        self.add_auxiliary_variable(true_scale, name="true_scale")
+        patch = self.cropper.apply(x, x_shape, true_location, true_scale)
+        self.add_auxiliary_variable(patch, name="patch")
+        return patch
+
     def locate(self, h):
         area = self.locate_mlp.apply(h)
         theta = self.theta_from_area.apply(area)
@@ -191,30 +219,6 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
         response = self.response_merge.apply(area, patch)
         response = self.response_merge_activation.apply(response)
         return self.response_mlp.apply(response)
-
-    @application
-    def compute_initial_state(self, x, x_shape):
-        batch_size = x_shape.shape[0]
-        initial_states = self.rnn.initial_states(batch_size, as_dict=True)
-        # condition on initial shrink-to-fit patch
-        raw_location = T.alloc(T.cast(0.0, floatX),
-                               batch_size, self.cropper.n_spatial_dims)
-        raw_scale = T.zeros_like(raw_location)
-        patch = self.crop(x, x_shape, raw_location, raw_scale)
-        u = self.embedder.apply(self.merge(patch, raw_location, raw_scale))
-        conditioned_states = self.rnn.apply(as_dict=True, inputs=u, iterate=False, **initial_states)
-        return tuple(conditioned_states.values())
-
-    def crop(self, x, x_shape, raw_location, raw_scale):
-        self.add_auxiliary_variable(raw_location, name="raw_location")
-        self.add_auxiliary_variable(raw_scale, name="raw_scale")
-        true_location, true_scale = self.map_to_input_space(
-            x_shape, raw_location, raw_scale)
-        self.add_auxiliary_variable(true_location, name="true_location")
-        self.add_auxiliary_variable(true_scale, name="true_scale")
-        patch = self.cropper.apply(x, x_shape, true_location, true_scale)
-        self.add_auxiliary_variable(patch, name="patch")
-        return patch
 
     def map_to_input_space(self, image_shape, location, scale):
         patch_shape = T.cast(self.cropper.patch_shape, floatX)
