@@ -1,9 +1,7 @@
-import logging, itertools
+import logging
 import numpy as np
-import theano
-import theano.tensor as T
+import theano, theano.tensor as T
 from blocks.bricks.base import application
-import blocks.graph, blocks.filter, blocks.roles
 import util, bricks, initialization, masonry, graph
 
 logger = logging.getLogger(__name__)

@@ -1,5 +1,4 @@
-from fuel.datasets.mnist import MNIST
-import fuel.transformers
+import numpy as np
 import tasks
 
 class Task(tasks.Classification):
@@ -11,6 +10,7 @@ class Task(tasks.Classification):
         self.n_channels = 1
 
     def load_datasets(self):
+        from fuel.datasets.mnist import MNIST
         return dict(
             train=MNIST(which_sets=["train"], subset=slice(None, 50000)),
             valid=MNIST(which_sets=["train"], subset=slice(50000, None)),

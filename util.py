@@ -177,15 +177,6 @@ def checkargs(f):
 def rectify(x):
     return (x > 0)*x
 
-def deep_children_of(parent):
-    bricks = []
-    fringe = collections.deque(parent.children)
-    while fringe:
-        brick = fringe.popleft()
-        bricks.append(brick)
-        fringe.extend(brick.children)
-    return bricks
-
 def all_bricks(bricks):
     fringe = collections.deque(bricks)
     bricks = []

@@ -2,16 +2,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 import theano, theano.tensor as T
-
-import blocks.graph
 from blocks.bricks.base import application
-import blocks.filter as filter
-import blocks.roles as roles
-
-import bricks
-import initialization
-
-import util, masonry, graph
+import bricks, initialization, util, masonry, graph
 
 class SingleSoftmax(bricks.Initializable):
     def __init__(self, input_dim, n_classes, batch_normalize, **kwargs):

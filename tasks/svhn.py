@@ -1,5 +1,4 @@
-from fuel.transformers import Mapping
-from fuel.datasets.svhn import SVHN
+import numpy as np
 import tasks
 
 class DigitTask(tasks.Classification):
@@ -11,6 +10,7 @@ class DigitTask(tasks.Classification):
         self.n_channels = 1
 
     def load_datasets(self):
+        from fuel.datasets.svhn import SVHN
         return dict(
             train=SVHN(which_sets=["train"], which_format=2, subset=slice(None, 50000)),
             valid=SVHN(which_sets=["train"], which_format=2, subset=slice(50000, None)),
@@ -40,6 +40,7 @@ class NumberTask(tasks.Classification):
         self.n_channels = 1
 
     def load_datasets(self):
+        from fuel.datasets.svhn import SVHN
         return dict(
 #            train=SVHN(which_sets="train extra".split(), which_format=1, subset=slice(None, 50000)),
 #            valid=SVHN(which_sets=["extra"], which_format=1, subset=slice(0, None)),

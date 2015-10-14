@@ -121,7 +121,6 @@ class VideoPatchMonitoring(SimpleExtension):
         locationss, scaless, patchess = self.extractor(videos, video_shapes)
 
         patch_shape = patchess.shape[-3:]
-        n_patches = patchess.shape[1]
 
         if videos.shape[1] == 1:
             # remove degenerate channel axis because pyplot rejects it

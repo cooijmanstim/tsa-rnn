@@ -1,24 +1,10 @@
 # SVHN number transcription as in http://arxiv.org/pdf/1312.6082v4.pdf
-import os, itertools, logging
-
+import os, logging
 import numpy as np
-
-import theano
-import theano.tensor as T
-
+import theano, theano.tensor as T
 from blocks.bricks.base import application
-from blocks.filter import VariableFilter
-from blocks import roles
-import blocks.graph
-
-from fuel.transformers import Mapping
 from fuel.datasets import H5PYDataset
-
-import bricks
-import initialization
-
-import tasks
-import masonry
+import bricks, initialization, tasks, masonry, util, graph
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +121,7 @@ class NumberTask(tasks.Classification):
                        batch_normalize=batch_normalize)
 
     def monitor_channels(self, graph):
+        from blocks.filter import VariableFilter
         return [VariableFilter(name=name)(graph.auxiliary_variables)[0]
                 for name in "cross_entropy error_rate".split()]
 

@@ -3,17 +3,7 @@ from collections import OrderedDict
 import theano
 import theano.tensor as T
 from blocks.graph import ComputationGraph
-import blocks.graph
-from blocks.model import Model
-from blocks.algorithms import GradientDescent, RMSProp, Adam, CompositeRule, StepClipping
-from blocks.main_loop import MainLoop
-from blocks.extensions import FinishAfter, Printing, ProgressBar, Timing
-from blocks.extensions.stopping import FinishIfNoImprovementAfter
-from blocks.extensions.training import SharedVariableModifier, TrackTheBest
-from blocks.extensions.monitoring import TrainingDataMonitoring, DataStreamMonitoring
-from blocks.extensions.saveload import Checkpoint
 import util, attention, crop, tasks, dump, graph
-from patchmonitor import PatchMonitoring, VideoPatchMonitoring
 
 # disable cached constants. this keeps the graph from ballooning with
 # map_variables.
@@ -38,6 +28,9 @@ def construct_monitors(algorithm, task, n_patches, x, x_shape, graphs,
                        name, ram, model, n_spatial_dims, plot_url,
                        hyperparameters, patchmonitor_interval=100,
                        **kwargs):
+    from blocks.extensions.monitoring import TrainingDataMonitoring, DataStreamMonitoring
+    from patchmonitor import PatchMonitoring, VideoPatchMonitoring
+
     extensions = []
 
     if True:
@@ -173,6 +166,7 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
     extensions = []
 
     # let theta noise decay as training progresses
+    from blocks.extensions.training import SharedVariableModifier
     for key in "location_std scale_std".split():
         hyperparameters[key] = theano.shared(hyperparameters[key], name=key)
         rate = hyperparameters["%s_decay" % key]
@@ -213,30 +207,38 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
             cost, ram=ram, emitter=emitter, **hyperparameters))
         for which_set in "train valid test".split())
 
-    uselessflunky = Model(graphs["train"].outputs[0])
+    from blocks.model import Model
+    model = Model(graphs["train"].outputs[0])
+
+    from blocks.algorithms import GradientDescent, CompositeRule, StepClipping, Adam
     algorithm = GradientDescent(
         cost=graphs["train"].outputs[0],
         parameters=graphs["train"].parameters,
         step_rule=CompositeRule([StepClipping(1e2),
                                  Adam(learning_rate=learning_rate)]))
+
     extensions.extend(construct_monitors(
         x=x, x_shape=x_shape,
-        algorithm=algorithm, task=task, model=uselessflunky, ram=ram,
+        algorithm=algorithm, task=task, model=model, ram=ram,
         graphs=graphs, **hyperparameters))
+
+    from blocks.extensions import FinishAfter, Printing, ProgressBar, Timing
+    from blocks.extensions.stopping import FinishIfNoImprovementAfter
+    from blocks.extensions.training import TrackTheBest
+    from dump import DumpBest, LightCheckpoint, PrintingTo
     extensions.extend([
         TrackTheBest("valid_error_rate", "best_valid_error_rate"),
         FinishIfNoImprovementAfter("best_valid_error_rate", epochs=patience_epochs),
         FinishAfter(after_n_epochs=max_epochs),
-        dump.DumpBest("best_valid_error_rate", name+"_best.zip"),
-        dump.LightCheckpoint(name+"_checkpoint.zip", on_interrupt=False),
-        ProgressBar(),
-        Timing(),
-        Printing(),
-        dump.PrintingTo(name+"_log")])
+        DumpBest("best_valid_error_rate", name+"_best.zip"),
+        LightCheckpoint(name+"_checkpoint.zip", on_interrupt=False),
+        ProgressBar(), Timing(), Printing(), PrintingTo(name+"_log")])
+
+    from blocks.main_loop import MainLoop
     main_loop = MainLoop(data_stream=task.get_stream("train"),
                          algorithm=algorithm,
                          extensions=extensions,
-                         model=uselessflunky)
+                         model=model)
 
     # note blocks will crash and burn because it cannot deal with an
     # already-initialized Algorithm, so this should be enabled only for

@@ -1,17 +1,11 @@
 import os
 import logging
-
 import numpy as np
-
-import theano
 import theano.tensor as T
-
 from blocks.filter import VariableFilter
-
 from fuel.streams import DataStream
 from fuel.schemes import ShuffledScheme, SequentialScheme
 from fuel import transformers
-
 import emitters
 
 logger = logging.getLogger(__name__)
