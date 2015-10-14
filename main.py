@@ -5,8 +5,6 @@ import theano.tensor as T
 from blocks.graph import ComputationGraph
 import blocks.graph
 from blocks.model import Model
-from blocks.filter import VariableFilter
-from blocks import roles
 from blocks.algorithms import GradientDescent, RMSProp, Adam, CompositeRule, StepClipping
 from blocks.main_loop import MainLoop
 from blocks.extensions import FinishAfter, Printing, ProgressBar, Timing
@@ -14,7 +12,7 @@ from blocks.extensions.stopping import FinishIfNoImprovementAfter
 from blocks.extensions.training import SharedVariableModifier, TrackTheBest
 from blocks.extensions.monitoring import TrainingDataMonitoring, DataStreamMonitoring
 from blocks.extensions.saveload import Checkpoint
-import util, attention, crop, tasks, dump
+import util, attention, crop, tasks, dump, graph
 from patchmonitor import PatchMonitoring, VideoPatchMonitoring
 
 # disable cached constants. this keeps the graph from ballooning with
@@ -140,23 +138,17 @@ def construct_monitors(algorithm, task, n_patches, x, x_shape, graphs,
     return extensions
 
 @util.checkargs
-def get_training_graph(cost, dropout, attention_dropout, recurrent_dropout,
-                       recurrent_weight_noise, ram, emitter, **kwargs):
+def get_training_graph(cost, ram, emitter, hyperparameters, **kwargs):
+    hyperparameters["rng"] = util.get_rng(seed=1)
+    emitter.tag_dropout([cost], **hyperparameters)
+    ram.tag_attention_dropout([cost], **hyperparameters)
+    ram.tag_recurrent_weight_noise([cost], **hyperparameters)
+    ram.tag_recurrent_dropout([cost], **hyperparameters)
     logger.warning("%i variables in graph" % util.graph_size([cost]))
-    [cost] = util.replace_by_tags(
-        [cost], "location_noise scale_noise".split())
+    [cost] = graph.apply_transforms([cost], reason="regularization",
+                                    hyperparameters=hyperparameters)
     logger.warning("%i variables in graph" % util.graph_size([cost]))
-    graph = ComputationGraph(cost)
-    logger.warning("%i variables in graph" % util.graph_size(graph.outputs))
-    graph = emitter.apply_dropout(graph, dropout)
-    logger.warning("%i variables in graph" % util.graph_size(graph.outputs))
-    graph = ram.apply_attention_dropout(graph, attention_dropout)
-    logger.warning("%i variables in graph" % util.graph_size(graph.outputs))
-    graph = ram.apply_recurrent_dropout(graph, recurrent_dropout)
-    logger.warning("%i variables in graph" % util.graph_size(graph.outputs))
-    graph = ram.apply_recurrent_weight_noise(graph, recurrent_weight_noise)
-    logger.warning("%i variables in graph" % util.graph_size(graph.outputs))
-    return graph
+    return ComputationGraph(cost)
 
 @util.checkargs
 def get_inference_graph(cost, **kwargs):

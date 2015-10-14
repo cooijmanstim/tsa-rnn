@@ -97,20 +97,18 @@ class Emitter(bricks.Initializable):
         cost = mean_cross_entropy
         return cost
 
-    def apply_dropout(self, graph, amount):
-        if amount <= 0:
-            return graph
-        variables = (
-            VariableFilter(
-                roles=[roles.INPUT],
-                bricks=list(itertools.chain.from_iterable(
-                    [brick for brick in mlp.children
-                     if isinstance(brick, bricks.Linear)]
-                    for mlp in self.emitters)))
-            (graph.variables))
-        logger.warning("%3.2f dropping out %s" % (amount, variables))
-        return blocks.graph.apply_dropout(
-            graph, variables, amount)
+    def tag_dropout(self, variables, rng=None, **hyperparameters):
+        from blocks.roles import INPUT
+        from blocks.filter import VariableFilter
+        rng = util.get_rng(seed=1)
+        bricks_ = [brick for brick in util.all_bricks(self.emitters)
+                   if isinstance(brick, bricks.Linear)]
+        variables = (VariableFilter(roles=[INPUT], bricks=bricks_)
+                     (theano.gof.graph.ancestors(variables)))
+        graph.add_transform(
+            variables,
+            graph.DropoutTransform("classifier_dropout", rng=rng),
+            reason="regularization")
 
 class NumberTask(tasks.Classification):
     name = "svhn_number"

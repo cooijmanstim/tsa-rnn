@@ -4,7 +4,7 @@ import theano
 import theano.tensor as T
 from blocks.bricks.base import application
 import blocks.graph, blocks.filter, blocks.roles
-import util, bricks, initialization, masonry
+import util, bricks, initialization, masonry, graph
 
 logger = logging.getLogger(__name__)
 floatX = theano.config.floatX
@@ -58,60 +58,6 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
         # states aren't known until now
         self.apply.outputs = self.rnn.apply.outputs
         self.compute_initial_state.outputs = self.rnn.apply.outputs
-
-    def apply_attention_dropout(self, graph, amount):
-        if amount <= 0:
-            return graph
-        variables = (
-            blocks.filter.VariableFilter(
-                roles=[blocks.roles.INPUT],
-                bricks=([self.embedder, self.theta_from_area] +
-                        [brick for brick in itertools.chain.from_iterable(
-                            map(util.deep_children_of,
-                                (self.patch_transform,
-                                 self.locate_mlp,
-                                 self.response_merge,
-                                 self.response_mlp)))
-                         if isinstance(brick, bricks.Linear)]))
-            (theano.gof.graph.ancestors(graph.outputs)))
-        variables = list(set(variables))
-        logger.warning("%3.2f dropping out %s" % (amount, variables))
-        return blocks.graph.apply_dropout(
-            graph, variables, amount)
-
-    def apply_recurrent_dropout(self, graph, amount):
-        if amount <= 0:
-            return graph
-        replacements = []
-        for i, lstm in enumerate(self.rnn.transitions):
-            variables = (
-                blocks.filter.VariableFilter(
-                    roles=[blocks.roles.INPUT], bricks=[lstm])
-                (theano.gof.graph.ancestors(graph.outputs)))
-            variables = list(set(variables))
-            variables = [var for var in variables
-                         if var.name.endswith("states")]
-            mask = (theano.sandbox.rng_mrg.MRG_RandomStreams(1 + i)
-                    .binomial(variables[0].shape,
-                              p=1 - amount,
-                              dtype=theano.config.floatX) /
-                    (1 - amount))
-            replacements.extend((variable, mask) for variable in variables)
-            logger.warning("%3.2f dropping out %s with equal mask" % (amount, variables))
-        for variable, replacement in replacements:
-            blocks.roles.add_role(replacement, blocks.roles.DROPOUT)
-            replacement.tag.replacement_of = variable
-        return graph.replace(replacements)
-
-    def apply_recurrent_weight_noise(self, graph, amount):
-        if amount <= 0:
-            return graph
-        variables = (VariableFilter(bricks=self.rnn.children,
-                                    roles=[roles.WEIGHT])
-                     (graph.parameters))
-        logger.warning("applying %3.2f gaussian noise to %s" % (amount, variables))
-        return blocks.graph.apply_noise(
-            graph, variables, amount)
 
     @util.checkargs
     def construct_merger(self, n_spatial_dims, n_channels,
@@ -185,8 +131,7 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
 
     @util.checkargs
     def construct_locator(self, locate_mlp_spec, n_spatial_dims,
-                          location_std, scale_std, batch_normalize,
-                          **kwargs):
+                          batch_normalize, **kwargs):
         self.n_spatial_dims = n_spatial_dims
 
         self.locate_mlp = masonry.construct_mlp(
@@ -207,10 +152,6 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
             # so the model will zoom in by default
             biases_init=initialization.Constant(np.array(
                 [0.] * n_spatial_dims + [1.] * n_spatial_dims)))
-
-        self.T_rng = theano.sandbox.rng_mrg.MRG_RandomStreams(12345)
-        self.location_std = location_std
-        self.scale_std = scale_std
 
         self.children.extend([
             self.locate_mlp,
@@ -235,15 +176,16 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
         theta = self.theta_from_area.apply(area)
         location, scale = (theta[:, :self.n_spatial_dims],
                            theta[:, self.n_spatial_dims:])
-        location = util.tag_for_replacement(
-            location, location + self.T_rng.normal(
-                location.shape, std=self.location_std, dtype=location.dtype),
-            "location_noise")
-        scale = util.tag_for_replacement(
-            scale, scale + self.T_rng.normal(
-                scale.shape, std=self.scale_std, dtype=scale.dtype),
-            "scale_noise")
-        return location, scale
+        graph.add_transform([location],
+                            graph.WhiteNoiseTransform("location_std"),
+                            reason="regularization")
+        graph.add_transform([scale],
+                            graph.WhiteNoiseTransform("scale_std"),
+                            reason="regularization")
+        # return copies so the caller can put tags on them and they
+        # won't be lost after applying the transforms
+        # FIXME: do this better. copy appropriate tags over to the replacement?
+        return location.copy(), scale.copy()
 
     def merge(self, patch, location, scale):
         patch = self.patch_transform.apply(patch)
@@ -288,3 +230,56 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
             util.rectify( location - patch_shape / scale - image_shape)))
         self.add_auxiliary_variable(excursion, name="excursion")
         return location, scale
+
+    def tag_attention_dropout(self, variables, rng=None, **hyperparameters):
+        from blocks.roles import INPUT
+        from blocks.filter import VariableFilter
+        bricks_ = [brick for brick in
+                   util.all_bricks([self.embedder, self.patch_transform])
+                   if isinstance(brick, bricks.Linear)]
+        variables = (VariableFilter(roles=[INPUT], bricks=bricks_)
+                     (theano.gof.graph.ancestors(variables)))
+        graph.add_transform(
+            variables,
+            graph.DropoutTransform("attention_dropout", rng=rng),
+            reason="regularization")
+
+    def tag_recurrent_weight_noise(self, variables, rng=None, **hyperparameters):
+        from blocks.roles import WEIGHT
+        from blocks.filter import VariableFilter
+        bricks = self.rnn.transitions
+        variables = (VariableFilter(roles=[WEIGHT], bricks=bricks)
+                     (theano.gof.graph.ancestors(variables)))
+        variables = [var for var in variables
+                     if var.name.endswith("state")]
+        graph.add_transform(
+            variables,
+            graph.WhiteNoiseTransform("recurrent_weight_noise", rng=rng),
+            reason="regularization")
+
+    def tag_recurrent_dropout(self, variables, recurrent_dropout,
+                              rng=None, **hyperparameters):
+        from blocks.roles import OUTPUT
+        from blocks.filter import VariableFilter
+        for lstm in self.rnn.transitions:
+            variables = (VariableFilter(roles=[OUTPUT], bricks=[lstm])
+                         (theano.gof.graph.ancestors(variables)))
+            variables = [var for var in variables
+                         if var.name.endswith("states")]
+
+            # get one dropout mask for all time steps.  use the very
+            # first state to get the hidden state shape, else we get
+            # graph cycles.
+            initial_state = [var for var in variables
+                             if "initial_state" in var.name]
+            assert(len(initial_state) == 1)
+            initial_state = initial_state[0]
+            mask = util.get_dropout_mask(
+                initial_state.shape, recurrent_dropout, rng=rng)
+
+            subsequent_states = [var for var in variables
+                                 if "initial_state" not in var.name]
+            graph.add_transform(
+                subsequent_states,
+                graph.DropoutTransform("recurrent_dropout", mask=mask),
+                reason="regularization")

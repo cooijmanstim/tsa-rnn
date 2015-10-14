@@ -1,5 +1,4 @@
 import logging, collections
-import numpy as np
 import bricks, initialization
 import blocks.bricks.conv as conv2d
 import conv3d

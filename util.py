@@ -1,10 +1,8 @@
 import sys, operator, logging, collections
-import itertools as it
 import numbers
 
 from collections import OrderedDict
 from cStringIO import StringIO
-import numpy as np
 
 import theano
 import theano.tensor.basic
@@ -152,41 +150,6 @@ def get_path(x):
     else:
         raise TypeError()
 
-def tag_for_replacement(variable, replacement, key):
-    # copy `variable` so that only the copy has the tag and any
-    # appearances of `variable` in `replacement` do not (or
-    # replacement will not terminate)
-    variable = variable.copy()
-    if not hasattr(variable.tag, "replacements"):
-        variable.tag.replacements = dict()
-    assert key not in variable.tag.replacements
-    variable.tag.replacements[key] = replacement
-    # return a copy so that tags put onto it by the caller are
-    # not lost after replacement
-    return variable.copy()
-
-def replace_by_tags(variables, keys):
-    def maybe_replace_one_once(variable):
-        for key in keys:
-            if key in variable.tag.replacements:
-                replacement = variable.tag.replacements[key]
-                logger.warning("replace_by_tags: %s: %s -> %s"
-                               % (key, variable, replacement))
-                return replacement
-        return variable
-    def maybe_replace_one(variable):
-        while hasattr(variable.tag, "replacements"):
-            replacement = maybe_replace_one_once(variable)
-            if replacement is variable:
-                break
-            variable = replacement
-        assert (not hasattr(variable.tag, "replacements") or
-                not any(key in variable.tag.replacements
-                        for key in keys))
-        return variable
-    return theano.scan_module.scan_utils.map_variables(
-        maybe_replace_one, variables)
-
 # decorator to improve python's terrible argument error reporting
 def checkargs(f):
     def g(*args, **kwargs):
@@ -223,5 +186,25 @@ def deep_children_of(parent):
         fringe.extend(brick.children)
     return bricks
 
+def all_bricks(bricks):
+    fringe = collections.deque(bricks)
+    bricks = []
+    while fringe:
+        brick = fringe.popleft()
+        bricks.append(brick)
+        fringe.extend(brick.children)
+    return bricks
+
 def graph_size(variable_list):
     return len(set(theano.gof.graph.ancestors(variable_list)))
+
+def get_dropout_mask(shape, probability, **rng_args):
+    rng = get_rng(**rng_args)
+    return (rng.binomial(shape, p=1 - probability,
+                         dtype=theano.config.floatX)
+            / (1 - probability))
+
+@checkargs
+def get_rng(rng=None, seed=None):
+    return rng or theano.sandbox.rng_mrg.MRG_RandomStreams(
+        1 if seed is None else seed)

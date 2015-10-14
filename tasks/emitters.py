@@ -1,7 +1,7 @@
 import logging
 logger = logging.getLogger(__name__)
 
-import theano.tensor as T
+import theano, theano.tensor as T
 
 import blocks.graph
 from blocks.bricks.base import application
@@ -11,8 +11,7 @@ import blocks.roles as roles
 import bricks
 import initialization
 
-import util
-import masonry
+import util, masonry, graph
 
 class SingleSoftmax(bricks.Initializable):
     def __init__(self, input_dim, n_classes, batch_normalize, **kwargs):
@@ -44,15 +43,15 @@ class SingleSoftmax(bricks.Initializable):
         self.add_auxiliary_variable(error_rate, name="error_rate")
         return cost
 
-    def apply_dropout(self, graph, amount):
-        if amount <= 0:
-            return graph
-        variables = (
-            filter.VariableFilter(
-                roles=[roles.INPUT],
-                bricks=[brick for brick in self.mlp.children
-                        if isinstance(brick, bricks.Linear)])
-            (graph.variables))
-        logger.warning("dropping out %s" % variables)
-        return blocks.graph.apply_dropout(
-            graph, variables, amount)
+    def tag_dropout(self, variables, rng=None, **hyperparameters):
+        from blocks.roles import INPUT
+        from blocks.filter import VariableFilter
+        rng = util.get_rng(seed=1)
+        bricks_ = [brick for brick in util.all_bricks([self.mlp])
+                   if isinstance(brick, bricks.Linear)]
+        variables = (VariableFilter(roles=[INPUT], bricks=bricks_)
+                     (theano.gof.graph.ancestors(variables)))
+        graph.add_transform(
+            variables,
+            graph.DropoutTransform("classifier_dropout", rng=rng),
+            reason="regularization")
