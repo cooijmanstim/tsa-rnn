@@ -3,7 +3,7 @@ from collections import OrderedDict
 import theano
 import theano.tensor as T
 from blocks.graph import ComputationGraph
-import util, attention, crop, tasks, dump, graph
+import util, attention, crop, tasks, dump, graph, bricks
 
 # disable cached constants. this keeps the graph from ballooning with
 # map_variables.
@@ -20,78 +20,52 @@ def construct_model(patch_shape, hidden_dim, hyperparameters, **kwargs):
         hidden_dim=hidden_dim, cropper=cropper,
         hyperparameters=hyperparameters,
         # attend based on upper RNN states
-        attention_state_name="states#1",
-        name="ram")
+        attention_state_name="states#1")
 
 @util.checkargs
-def construct_monitors(algorithm, task, n_patches, x, x_shape, graphs,
-                       name, ram, model, n_spatial_dims, plot_url,
-                       hyperparameters, patchmonitor_interval=100,
-                       **kwargs):
+def construct_monitors(algorithm, task, model, graphs, outputs,
+                       n_spatial_dims, plot_url, hyperparameters,
+                       patchmonitor_interval, **kwargs):
     from blocks.extensions.monitoring import TrainingDataMonitoring, DataStreamMonitoring
     from patchmonitor import PatchMonitoring, VideoPatchMonitoring
 
     extensions = []
 
     if True:
-        step_norms = util.Channels()
-        step_norms.extend(
-            algorithm.steps[param].norm(2).copy(name="%s.step_norm" % name)
-            for name, param in model.get_parameter_dict().items())
-        step_channels = step_norms.get_channels()
-
         extensions.append(TrainingDataMonitoring(
-            step_channels, prefix="train", after_epoch=True))
+            [algorithm.steps[param].norm(2).copy(name="step_norm:%s" % name)
+             for name, param in model.get_parameter_dict().items()],
+            prefix="train", after_epoch=True))
 
     if True:
-        data_independent_channels = util.Channels()
+        data_independent_channels = []
         for parameter in graphs["train"].parameters:
             if parameter.name in "gamma beta".split():
                 quantity = parameter.mean()
-                quantity.name = "%s.mean" % util.get_path(parameter)
+                quantity.name = "parameter:%s.mean" % util.get_path(parameter)
                 data_independent_channels.append(quantity)
         for key in "location_std scale_std".split():
-            data_independent_channels.append(hyperparameters[key].copy(name=key))
-
+            data_independent_channels.append(hyperparameters[key].copy(name="parameter:%s" % key))
         extensions.append(DataStreamMonitoring(
-            data_independent_channels.get_channels(),
-            data_stream=None, after_epoch=True))
+            data_independent_channels, data_stream=None, after_epoch=True))
 
     for which_set in "train valid test".split():
-        graph = graphs[which_set]
-
-        channels = util.Channels()
-        channels.extend(task.monitor_channels(graph))
-
-        (raw_location, raw_scale,
-         true_location, true_scale) = util.get_recurrent_auxiliaries(
-             "raw_location raw_scale true_location true_scale".split(),
-             graph, n_patches, require_in_graph=True)
-
-        savings, = util.get_recurrent_auxiliaries(
-            "savings".split(), graph, n_patches)
-
-        channels.append(savings.mean().copy(name="savings.mean"))
-
-        [excursion_cost] = [var for var in graph.variables
-                        if var.name == "excursion_cost"]
-        channels.append(excursion_cost)
-
-        for variable_name in "raw_location raw_scale".split():
-            variable = locals()[variable_name]
-            channels.append(variable.mean(axis=0).T,
-                            "%s.mean" % variable_name)
-            channels.append(variable.var(axis=0).T,
-                            "%s.variance" % variable_name)
-
+        channels = []
+        channels.extend(outputs[which_set][key] for key in
+                        "cost emitter_cost excursion_cost".split())
+        channels.extend(outputs[which_set][key] for key in
+                        task.monitor_outputs())
+        channels.append(outputs[which_set]["savings"]
+                        .mean().copy(name="mean_savings"))
+        for key in "raw_location raw_scale".split():
+            for stat in "mean var".split():
+                channels.append(getattr(outputs[which_set][key], stat)(axis=1)
+                                .copy(name="%s.%s" % (key, stat)))
         if which_set == "train":
-            channels.append(algorithm.total_gradient_norm,
-                            "total_gradient_norm")
-
+            channels.append(algorithm.total_gradient_norm.copy(name="total_gradient_norm"))
         extensions.append(DataStreamMonitoring(
-            (channels.get_channels() + graph.outputs),
-            data_stream=task.get_stream(which_set, monitor=True),
-            prefix=which_set, after_epoch=True))
+            channels, prefix=which_set, after_epoch=True,
+            data_stream=task.get_stream(which_set, monitor=True)))
 
     patchmonitor = None
     if n_spatial_dims == 2:
@@ -100,17 +74,15 @@ def construct_monitors(algorithm, task, n_patches, x, x_shape, graphs,
         patchmonitor_klass = VideoPatchMonitoring
 
     if patchmonitor_klass:
-        patch = T.stack([ram.crop(x, x_shape,
-                                  raw_location[:, i, :],
-                                  raw_scale[:, i, :])
-                         for i in xrange(n_patches)])
-        patch = patch.dimshuffle(1, 0, *range(2, patch.ndim))
-        patch_extractor = theano.function(
-            [x, x_shape], [raw_location, raw_scale, patch])
-
         for which in "train valid".split():
+            patch = outputs[which]["patch"]
+            patch = patch.dimshuffle(1, 0, *range(2, patch.ndim))
+            patch_extractor = theano.function(
+                [outputs[which][key] for key in "x x_shape".split()],
+                [outputs[which][key] for key in "raw_location raw_scale".split()] + [patch])
+
             patchmonitor = patchmonitor_klass(
-                save_to="%s_patches_%s" % (name, which),
+                save_to="%s_patches_%s" % (hyperparameters["name"], which),
                 data_stream=task.get_stream(which, shuffle=False, num_examples=10),
                 every_n_batches=patchmonitor_interval,
                 extractor=patch_extractor,
@@ -131,26 +103,95 @@ def construct_monitors(algorithm, task, n_patches, x, x_shape, graphs,
     return extensions
 
 @util.checkargs
-def get_training_graph(cost, ram, emitter, hyperparameters, **kwargs):
-    hyperparameters["rng"] = util.get_rng(seed=1)
-    emitter.tag_dropout([cost], **hyperparameters)
-    ram.tag_attention_dropout([cost], **hyperparameters)
-    ram.tag_recurrent_weight_noise([cost], **hyperparameters)
-    ram.tag_recurrent_dropout([cost], **hyperparameters)
-    logger.warning("%i variables in graph" % util.graph_size([cost]))
-    [cost] = graph.apply_transforms([cost], reason="regularization",
-                                    hyperparameters=hyperparameters)
-    logger.warning("%i variables in graph" % util.graph_size([cost]))
-    return ComputationGraph(cost)
+def prepare_mode(mode, outputs, ram, emitter, hyperparameters, **kwargs):
+    if mode == "training":
+        hyperparameters["rng"] = util.get_rng(seed=1)
+        emitter.tag_dropout(outputs, **hyperparameters)
+        ram.tag_attention_dropout(outputs, **hyperparameters)
+        ram.tag_recurrent_weight_noise(outputs, **hyperparameters)
+        ram.tag_recurrent_dropout(outputs, **hyperparameters)
+        logger.warning("%i variables in %s graph" % (util.graph_size(outputs), mode))
+        outputs = graph.apply_transforms(outputs, reason="regularization",
+                                         hyperparameters=hyperparameters)
+        logger.warning("%i variables in %s graph" % (util.graph_size(outputs), mode))
+
+        updates = bricks.BatchNormalization.get_updates(outputs)
+        print "batch normalization updates:", updates
+
+        return outputs, updates
+    elif mode == "inference":
+        logger.warning("%i variables in %s graph" % (util.graph_size(outputs), mode))
+        outputs = graph.apply_transforms(
+            outputs, reason="population_normalization",
+            hyperparameters=hyperparameters)
+        logger.warning("%i variables in %s graph" % (util.graph_size(outputs), mode))
+        return outputs, []
 
 @util.checkargs
-def get_inference_graph(cost, **kwargs):
-    return ComputationGraph(cost)
+def construct_graphs(task, n_patches, hyperparameters, **kwargs):
+    x, x_shape, y = task.get_variables()
 
-graph_constructors = dict(
-    train=get_training_graph,
-    valid=get_inference_graph,
-    test=get_inference_graph)
+    ram = construct_model(task=task, **hyperparameters)
+    ram.initialize()
+
+    scopes = []
+    scopes.append(ram.apply(util.Scope(x=x, x_shape=x_shape), initial=True))
+    n_steps = n_patches - 1
+    for i in xrange(n_steps):
+        scopes.append(ram.apply(util.Scope(
+            x=x, x_shape=x_shape,
+            previous_states=scopes[-1].rnn_outputs)))
+
+    emitter = task.get_emitter(
+        input_dim=ram.get_dim("states"),
+        **hyperparameters)
+    emitter.initialize()
+
+    emitter_outputs = emitter.emit(scopes[-1].rnn_outputs["states"], y, n_patches)
+    emitter_cost = emitter_outputs.cost.copy(name="emitter_cost")
+    # take abs to avoid sudden huge gradient
+    excursion_cost = sum(abs(scope.excursion) for scope in scopes).mean().copy(name="excursion_cost")
+    cost = (emitter_cost + excursion_cost).copy(name="cost")
+
+    # gather all the outputs we could possibly care about for training
+    # *and* monitoring; prepare_graphs will do graph transformations
+    # after which we may *only* use these to access *any* variables.
+    outputs_by_name = OrderedDict()
+    for key in "x x_shape emitter_cost excursion_cost cost".split():
+        outputs_by_name[key] = locals()[key]
+    for key in task.monitor_outputs():
+        outputs_by_name[key] = emitter_outputs[key]
+    for key in "raw_location raw_scale patch savings".split():
+        outputs_by_name[key] = T.stack([scope[key] for scope in scopes])
+    outputs = list(outputs_by_name.values())
+
+    # construct training and inference graphs
+    mode_by_set = OrderedDict([
+        ("train", "training"),
+        ("valid", "inference"),
+        ("test", "inference")])
+    outputs_by_mode, updates_by_mode = OrderedDict(), OrderedDict()
+    for mode in "training inference".split():
+        (outputs_by_mode[mode],
+         updates_by_mode[mode]) = prepare_mode(
+             mode, outputs, ram=ram, emitter=emitter, **hyperparameters)
+    # inference updates may make sense at some point but don't know
+    # where to put them now
+    assert not updates_by_mode["inference"]
+
+    # assign by set for convenience
+    graphs_by_set = OrderedDict([
+        (which_set, ComputationGraph(outputs_by_mode[mode]))
+        for which_set, mode in mode_by_set.items()])
+    outputs_by_set = OrderedDict([
+        (which_set, OrderedDict(util.equizip(outputs_by_name.keys(),
+                                             outputs_by_mode[mode])))
+        for which_set, mode in mode_by_set.items()])
+    updates_by_set = OrderedDict([
+        (which_set, updates_by_mode[mode])
+        for which_set, mode in mode_by_set.items()])
+
+    return graphs_by_set, outputs_by_set, updates_by_set
 
 @util.checkargs
 def construct_main_loop(name, task_name, patch_shape, batch_size,
@@ -176,51 +217,25 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
 
     theano.config.compute_test_value = "warn"
 
-    x, x_shape, y = task.get_variables()
-
-    ram = construct_model(task=task, **hyperparameters)
-    ram.initialize()
-
-    states = []
-    states.append(ram.compute_initial_state(x, x_shape, as_dict=True))
-    n_steps = n_patches - 1
-    for i in xrange(n_steps):
-        states.append(ram.apply(x, x_shape, as_dict=True, **states[-1]))
-
-    emitter = task.get_emitter(
-        input_dim=ram.get_dim("states"),
-        **hyperparameters)
-    emitter.initialize()
-    emitter_cost = emitter.cost(states[-1]["states"], y, n_patches)
-
-    [excursion] = util.get_recurrent_auxiliaries(
-        ["excursion"], ComputationGraph(emitter_cost), n_patches)
-    excursion_cost = (excursion**2).sum(axis=[1, 2]).mean(axis=0)
-    excursion_cost.name = "excursion_cost"
-
-    cost = emitter_cost + excursion_cost
-    cost.name = "cost"
+    print "constructing graphs..."
+    graphs, outputs, updates = construct_graphs(task=task, **hyperparameters)
 
     print "setting up main loop..."
-    graphs = OrderedDict(
-        (which_set, graph_constructors[which_set](
-            cost, ram=ram, emitter=emitter, **hyperparameters))
-        for which_set in "train valid test".split())
 
     from blocks.model import Model
-    model = Model(graphs["train"].outputs[0])
+    model = Model(outputs["train"]["cost"])
 
     from blocks.algorithms import GradientDescent, CompositeRule, StepClipping, Adam
     algorithm = GradientDescent(
-        cost=graphs["train"].outputs[0],
+        cost=outputs["train"]["cost"],
         parameters=graphs["train"].parameters,
-        step_rule=CompositeRule([StepClipping(1e2),
+        step_rule=CompositeRule([StepClipping(1e1),
                                  Adam(learning_rate=learning_rate)]))
+    algorithm.add_updates(updates["train"])
 
     extensions.extend(construct_monitors(
-        x=x, x_shape=x_shape,
-        algorithm=algorithm, task=task, model=model, ram=ram,
-        graphs=graphs, **hyperparameters))
+        algorithm=algorithm, task=task, model=model, graphs=graphs,
+        outputs=outputs, **hyperparameters))
 
     from blocks.extensions import FinishAfter, Printing, ProgressBar, Timing
     from blocks.extensions.stopping import FinishIfNoImprovementAfter

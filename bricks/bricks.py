@@ -1,16 +1,19 @@
-import operator
+import operator, logging
+from collections import OrderedDict
 
 import theano
 import theano.tensor as T
 
 from blocks.bricks.base import application, lazy
-from blocks.roles import add_role, WEIGHT, BIAS
+from blocks.roles import add_role, WEIGHT, BIAS, VariableRole
 from blocks.utils import shared_floatx_nans
 
 import blocks.bricks as bricks
 from blocks.bricks.conv import Flattener
 
-import initialization
+import initialization, graph, util
+
+logger = logging.getLogger(__name__)
 
 class NormalizedActivation(bricks.Initializable, bricks.Feedforward):
     @lazy(allocation="shape broadcastable".split())
@@ -149,10 +152,16 @@ class SharedShift(bricks.Initializable, bricks.Feedforward):
             return self.shape
         return super(SharedShift, self).get_dim(name)
 
-# TODO: replacement of batch/population statistics by annotations
-# TODO: depends on replacements inside scan
+class BatchMeanRole(VariableRole):
+    pass
+class BatchVarRole(VariableRole):
+    pass
+
 class BatchNormalization(bricks.Initializable, bricks.Feedforward):
     stats = "mean var".split()
+    roles = dict(
+        mean=BatchMeanRole(),
+        var=BatchVarRole())
 
     def __init__(self, shape, broadcastable, alpha=1e-2, **kwargs):
         super(BatchNormalization, self).__init__(**kwargs)
@@ -189,13 +198,20 @@ class BatchNormalization(bricks.Initializable, bricks.Feedforward):
                                          keepdims=True))
             for stat in self.stats)
 
-        # NOTE: these are unused for now
-        self._updates = [(self.population_stats[stat],
-                          (1 - self.alpha)*self.population_stats[stat]
-                          + self.alpha*self.batch_stats[stat])
-                         for stat in self.stats]
-        self._replacements = [(self.batch_stats[stat], self.population_stats[stat])
-                              for stat in self.stats]
+        for stat, role in self.roles.items():
+            graph.add_transform([self.batch_stats[stat]],
+                                graph.ConstantTransform(
+                                    # adding zero to ensure it's a TensorType(float32, row)
+                                    # just like the corresponding batch_stat, rather than a
+                                    # CudaNdarray(float32, row).  -__-
+                                    0 + T.patternbroadcast(
+                                        self.population_stats[stat],
+                                        [True] + self.broadcastable)),
+                                reason="population_normalization")
+
+            # make the batch statistics identifiable to get_updates() below
+            add_role(self.batch_stats[stat], self.roles[stat])
+            self.batch_stats[stat].tag.batch_normalization_brick = self
 
         gamma = T.patternbroadcast(self.gamma, [True] + self.broadcastable)
         beta = T.patternbroadcast(self.beta, [True] + self.broadcastable)
@@ -203,3 +219,33 @@ class BatchNormalization(bricks.Initializable, bricks.Feedforward):
             inputs=input_, gamma=gamma, beta=beta,
             mean=self.batch_stats["mean"],
             std=T.sqrt(self.batch_stats["var"]) + 1e-8)
+
+    @staticmethod
+    def get_updates(variables):
+        # this is fugly because we must get the batch stats from the
+        # graph so we get the ones that are *actually being used in
+        # the computation* after graph transforms have been applied
+        updates = []
+        variables = theano.gof.graph.ancestors(variables)
+        for stat, role in BatchNormalization.roles.items():
+            from blocks.filter import VariableFilter
+            batch_stats = VariableFilter(roles=[role])(variables)
+            batch_stats = util.dedup(batch_stats, equal=util.equal_computations)
+
+            batch_stats_by_brick = OrderedDict()
+            for batch_stat in batch_stats:
+                brick = batch_stat.tag.batch_normalization_brick
+                population_stat = brick.population_stats[stat]
+                batch_stats_by_brick.setdefault(brick, []).append(batch_stat)
+
+            for brick, batch_stats in batch_stats_by_brick.items():
+                population_stat = brick.population_stats[stat]
+                if len(batch_stats) > 1:
+                    # makes sense for recurrent structures
+                    logger.warning("averaging multiple population statistic estimates to update %s: %s"
+                                   % (util.get_path(population_stat), batch_stats))
+                batch_stat = T.stack(batch_stats).mean(axis=0)
+                updates.append((population_stat,
+                                (1 - brick.alpha) * population_stat
+                                + brick.alpha * batch_stat))
+        return updates

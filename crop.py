@@ -66,7 +66,8 @@ class LocallySoftRectangularCropper(Brick):
 
         return a, b
 
-    @application(inputs="image image_shape location scale".split(), outputs=['patch'])
+    @application(inputs="image image_shape location scale".split(),
+                 outputs="patch savings".split())
     def apply(self, image, image_shape, location, scale):
         a, b = self.compute_hard_windows(image_shape, location, scale)
 
@@ -88,9 +89,7 @@ class LocallySoftRectangularCropper(Brick):
                                   sequences=[image, a, b, location, scale])
 
         savings = (1 - T.cast((b - a).prod(axis=1), floatX) / image_shape.prod(axis=1))
-        self.add_auxiliary_variable(savings, name="savings")
-
-        return patch
+        return patch, savings
 
     def apply_inner(self, image, location, scale, a, b):
         slices = [theano.gradient.disconnected_grad(T.arange(a[i], b[i]))

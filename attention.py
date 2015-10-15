@@ -21,10 +21,12 @@ def static_map_to_input_space(location, scale, patch_shape, image_shape):
     scale += patch_shape / image_shape
     return location, scale
 
-class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
+class RecurrentAttentionModel(object):
     def __init__(self, hidden_dim, cropper,
                  attention_state_name, hyperparameters, **kwargs):
-        super(RecurrentAttentionModel, self).__init__(**kwargs)
+        # we're no longer a brick, but we still need to make sure we
+        # initialize everything
+        self.children = []
 
         self.rnn = bricks.RecurrentStack(
             [bricks.GatedRecurrent(activation=bricks.Tanh(), dim=hidden_dim),
@@ -47,19 +49,16 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
             use_bias=True,
             weights_init=initialization.Orthogonal(),
             biases_init=initialization.Constant(1))
-        
-        # don't let blocks touch my children
-        self.initialization_config_pushed = True
 
         self.children.extend([self.rnn, self.cropper, self.embedder])
 
-        # states aren't known until now
-        self.apply.outputs = self.rnn.apply.outputs
-        self.compute_initial_state.outputs = self.rnn.apply.outputs
+    def initialize(self):
+        for child in self.children:
+            child.initialize()
 
     @util.checkargs
     def construct_merger(self, n_spatial_dims, n_channels,
-                         patch_shape, response_dim, patch_cnn_spec,
+                         patch_shape, patch_cnn_spec,
                          patch_mlp_spec, merge_mlp_spec,
                          response_mlp_spec, batch_normalize,
                          batch_normalize_patch, **kwargs):
@@ -96,33 +95,15 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
             biases_init=initialization.Constant(0),
             batch_normalize=batch_normalize)
 
-        # construct what-where merger network
-        self.response_merge = bricks.Merge(
-            input_names="area patch".split(),
-            input_dims=[self.merge_mlp.output_dim,
-                        self.patch_transform.output_dim],
-            output_dim=response_dim,
-            prototype=bricks.Linear(
-                use_bias=False,
-                weights_init=initialization.Orthogonal(),
-                biases_init=initialization.Constant(0)),
-            child_prefix="response_merge")
-        self.response_merge_activation = bricks.NormalizedActivation(
-            shape=[response_dim],
-            name="response_merge_activation",
-            batch_normalize=batch_normalize)
-
         self.response_mlp = masonry.construct_mlp(
             name="response_mlp",
             hidden_dims=response_mlp_spec,
-            input_dim=response_dim,
+            input_dim=self.patch_transform.output_dim + self.merge_mlp.output_dim,
             weights_init=initialization.Orthogonal(),
             biases_init=initialization.Constant(0),
             batch_normalize=batch_normalize)
 
         self.children.extend([
-            self.response_merge_activation,
-            self.response_merge,
             self.patch_transform,
             self.merge_mlp,
             self.response_mlp])
@@ -156,82 +137,65 @@ class RecurrentAttentionModel(bricks.BaseRecurrent, bricks.Initializable):
             self.theta_from_area])
 
     def get_dim(self, name):
-        try:
-            return self.rnn.get_dim(name)
-        except:
-            return super(RecurrentAttentionModel, self).get_dim(name)
+        return self.rnn.get_dim(name)
 
-    @application
-    def compute_initial_state(self, x, x_shape):
-        batch_size = x_shape.shape[0]
-        # condition on initial shrink-to-fit patch
-        raw_location = T.alloc(T.cast(0.0, floatX),
-                               batch_size, self.cropper.n_spatial_dims)
-        raw_scale = T.zeros_like(raw_location)
-        patch = self.crop(x, x_shape, raw_location, raw_scale)
-        states = self.rnn.initial_states(batch_size, as_dict=True)
-        return self.recur(self.merge(patch, raw_location, raw_scale), **states)
-
-    @application
-    def apply(self, x, x_shape, **states):
-        raw_location, raw_scale = self.locate(states[self.attention_state_name])
-        patch = self.crop(x, x_shape, raw_location, raw_scale)
-        return self.recur(self.merge(patch, raw_location, raw_scale), **states)
-
-    def recur(self, merged, **states):
-        u = self.embedder.apply(merged)
+    def apply(self, scope, initial=False):
+        if initial:
+            batch_size = scope.x_shape.shape[0]
+            # condition on initial shrink-to-fit patch
+            scope.raw_location = T.alloc(T.cast(0.0, floatX),
+                                         batch_size, self.cropper.n_spatial_dims)
+            scope.raw_scale = T.zeros_like(scope.raw_location)
+            scope.previous_states = self.rnn.initial_states(batch_size, as_dict=True)
+        else:
+            self.locate(scope)
+        self.map_to_input_space(scope)
+        scope.patch, scope.savings = self.cropper.apply(scope.x, scope.x_shape, scope.true_location, scope.true_scale)
+        scope.response = self.response_mlp.apply(
+            T.concatenate([
+                self.patch_transform.apply(scope.patch),
+                self.merge_mlp.apply(
+                    T.concatenate([
+                        scope.raw_location,
+                        scope.raw_scale
+                    ], axis=1)),
+            ], axis=1))
+        embedding = self.embedder.apply(scope.response)
         hidden_dim = self.rnn.get_dim("inputs")
-        inputs, gate_inputs = u[:, :hidden_dim], u[:, hidden_dim:]
-        states = self.rnn.apply(inputs=inputs, gate_inputs=gate_inputs,
-                                iterate=False, as_dict=True, **states)
-        return tuple(states.values())
+        scope.rnn_inputs = dict(
+            inputs=embedding[:, :hidden_dim],
+            gate_inputs=embedding[:, hidden_dim:],
+            **scope.previous_states)
+        scope.rnn_outputs = self.rnn.apply(iterate=False, as_dict=True,
+                                           **scope.rnn_inputs)
+        return scope
 
-    def crop(self, x, x_shape, raw_location, raw_scale):
-        self.add_auxiliary_variable(raw_location, name="raw_location")
-        self.add_auxiliary_variable(raw_scale, name="raw_scale")
-        true_location, true_scale = self.map_to_input_space(
-            x_shape, raw_location, raw_scale)
-        self.add_auxiliary_variable(true_location, name="true_location")
-        self.add_auxiliary_variable(true_scale, name="true_scale")
-        patch = self.cropper.apply(x, x_shape, true_location, true_scale)
-        self.add_auxiliary_variable(patch, name="patch")
-        return patch
-
-    def locate(self, h):
-        area = self.locate_mlp.apply(h)
-        theta = self.theta_from_area.apply(area)
-        location, scale = (theta[:, :self.n_spatial_dims],
-                           theta[:, self.n_spatial_dims:])
+    def locate(self, scope, initial=False):
+        scope.theta = self.theta_from_area.apply(
+            self.locate_mlp.apply(
+                scope.previous_states[self.attention_state_name]))
+        location, scale = (scope.theta[:, :self.n_spatial_dims],
+                           scope.theta[:, self.n_spatial_dims:])
         graph.add_transform([location],
                             graph.WhiteNoiseTransform("location_std"),
                             reason="regularization")
         graph.add_transform([scale],
                             graph.WhiteNoiseTransform("scale_std"),
                             reason="regularization")
-        # return copies so the caller can put tags on them and they
-        # won't be lost after applying the transforms
-        # FIXME: do this better. copy appropriate tags over to the replacement?
-        return location.copy(), scale.copy()
+        scope.raw_location = location.copy()
+        scope.raw_scale = scale.copy()
 
-    def merge(self, patch, location, scale):
-        patch = self.patch_transform.apply(patch)
-        area = self.merge_mlp.apply(T.concatenate([location, scale], axis=1))
-        response = self.response_merge.apply(area, patch)
-        response = self.response_merge_activation.apply(response)
-        return self.response_mlp.apply(response)
-
-    def map_to_input_space(self, image_shape, location, scale):
+    def map_to_input_space(self, scope):
         patch_shape = T.cast(self.cropper.patch_shape, floatX)
-        image_shape = T.cast(image_shape, floatX)
-        location, scale = static_map_to_input_space(
-            location, scale, patch_shape, image_shape)
+        image_shape = scope.x_shape
+        scope.true_location, scope.true_scale = static_map_to_input_space(
+            scope.raw_location, scope.raw_scale,
+            patch_shape, image_shape)
         # if the patch does not overlap with the image, this measures
         # the gap (in each dimension)
-        excursion = sum((
-            util.rectify(-location - patch_shape / scale),
-            util.rectify( location - patch_shape / scale - image_shape)))
-        self.add_auxiliary_variable(excursion, name="excursion")
-        return location, scale
+        scope.excursion = sum(map(util.rectify, (
+            -scope.true_location - patch_shape / scope.true_scale,
+             scope.true_location - patch_shape / scope.true_scale - image_shape)))
 
     def tag_attention_dropout(self, variables, rng=None, **hyperparameters):
         from blocks.roles import INPUT

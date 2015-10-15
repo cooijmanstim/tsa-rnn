@@ -73,9 +73,8 @@ class Classification(object):
         return emitters.SingleSoftmax(input_dim, self.n_classes,
                                       batch_normalize=batch_normalize)
 
-    def monitor_channels(self, graph):
-        return [VariableFilter(name=name)(graph.auxiliary_variables)[0]
-                for name in "cross_entropy error_rate".split()]
+    def monitor_outputs(self):
+        return "cross_entropy error_rate".split()
 
     def plot_channels(self):
         return [["%s_%s" % (which_set, name) for which_set in self.datasets.keys()]

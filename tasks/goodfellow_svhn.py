@@ -15,10 +15,8 @@ class SVHN(H5PYDataset):
             os.path.join(os.environ["SVHN"], "dataset_64_gray.h5"),
             **kwargs)
 
-class Emitter(bricks.Initializable):
-    def __init__(self, input_dim, n_classes, batch_normalize, **kwargs):
-        super(Emitter, self).__init__(**kwargs)
-
+class Emitter(object):
+    def __init__(self, input_dim, n_classes, batch_normalize):
         self.input_dim = input_dim
         self.n_classes = n_classes
 
@@ -37,8 +35,11 @@ class Emitter(bricks.Initializable):
 
         self.children = self.emitters + [self.softmax]
 
-    @application(inputs=['x', 'y'], outputs=['cost'])
-    def cost(self, x, y, n_patches):
+    def initialize(self):
+        for child in self.children:
+            child.initialize()
+
+    def emit(self, x, y, n_patches):
         max_length = len(self.n_classes) - 1
         _length_masks = theano.shared(
             np.tril(np.ones((max_length, max_length), dtype='int8')),
@@ -77,11 +78,10 @@ class Emitter(bricks.Initializable):
         mean_cross_entropy = compute_mean_cross_entropy(y, logprobs)
         error_rate = compute_error_rate(y, logprobs)
 
-        self.add_auxiliary_variable(mean_cross_entropy, name="cross_entropy")
-        self.add_auxiliary_variable(error_rate, name="error_rate")
-
-        cost = mean_cross_entropy
-        return cost
+        return util.Scope(
+            cost=mean_cross_entropy.copy(name="cost"),
+            cross_entropy=mean_cross_entropy.copy(name="cross_entropy"),
+            error_rate=error_rate.copy(name="error_rate"))
 
     def tag_dropout(self, variables, rng=None, **hyperparameters):
         from blocks.roles import INPUT

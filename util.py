@@ -1,4 +1,4 @@
-import sys, operator, logging, collections
+import sys, operator, logging, collections, itertools
 import numbers
 
 from collections import OrderedDict
@@ -33,33 +33,6 @@ def subtensor(x, index_specs):
     indices = broadcast_indices(index_specs, x.ndim)
     return x[tuple(indices)]
 
-# to handle non-unique monitoring channels without crashing and
-# without silent loss of information
-class Channels(object):
-    def __init__(self):
-        self.dikt = OrderedDict()
-
-    def append(self, quantity, name=None):
-        if name is not None:
-            quantity = quantity.copy(name=name)
-        self.dikt.setdefault(quantity.name, []).append(quantity)
-
-    def extend(self, quantities):
-        for quantity in quantities:
-            self.append(quantity)
-
-    def get_channels(self):
-        channels = []
-        for _, quantities in self.dikt.items():
-            if len(quantities) == 1:
-                channels.append(quantities[0])
-            else:
-                # name not unique; uniquefy
-                for i, quantity in enumerate(quantities):
-                    channels.append(quantity.copy(name="%s[%i]"
-                                                  % (quantity.name, i)))
-        return channels
-
 # from http://stackoverflow.com/a/16571630
 class StdoutLines(list):
     def __enter__(self):
@@ -90,36 +63,6 @@ def dedup(xs, equal=operator.is_):
 def equal_computations(a, b):
     return theano.scan_module.scan_utils.equal_computations([a], [b])
 
-def get_recurrent_auxiliaries(names, graph, n_steps=None, require_in_graph=False):
-    if require_in_graph:
-        # ComputationGraph.auxiliary_variables includes auxiliaries
-        # that may no longer be in the theano graph (except through
-        # annotations). use `require_in_graph` to filter them out.
-        all_variables = set(theano.gof.graph.ancestors(graph.outputs))
-
-    variables = []
-    for name in names:
-        steps = VariableFilter(name=name)(graph.auxiliary_variables)
-        if require_in_graph:
-            steps = [step for step in steps if step in all_variables]
-        steps = dedup(steps, equal=equal_computations)
-
-        if n_steps is not None:
-            assert len(steps) == n_steps
-
-        # a super crude sanity check to ensure these auxiliaries are
-        # actually in chronological order
-        assert all(_a < _b for _a, _b in 
-                   (lambda _xs: zip(_xs, _xs[1:]))
-                   ([len(theano.printing.debugprint(step, file="str"))
-                     for step in steps]))
-
-        variable = T.stack(steps)
-        # move batch axis before rnn time axis
-        variable = variable.dimshuffle(1, 0, *range(2, variable.ndim))
-        variables.append(variable)
-    return variables
-
 from blocks.bricks.base import Brick, ApplicationCall
 
 # attempt to fully qualify an annotated variable
@@ -128,12 +71,14 @@ def get_path(x):
                       # zzzzzzzzzzzzzzzzzzzzzzzzzzz
                       T.sharedvar.TensorSharedVariable,
                       T.compile.sharedvalue.SharedVariable)):
-        paths = list(set(map(get_path, x.tag.annotations)))
+        paths = list(set(map(get_path, getattr(x.tag, "annotations", []))))
         name = getattr(x.tag, "name", x.name)
         if len(paths) > 1:
             logger.warning(
                 "get_path: variable %s has multiple possible origins, using first of [%s]"
                 % (name, " ".join(paths)))
+        if len(paths) < 1:
+            return name
         return paths[0] + "/" + name
     elif isinstance(x, Brick):
         if x.parents:
@@ -199,3 +144,46 @@ def get_dropout_mask(shape, probability, **rng_args):
 def get_rng(rng=None, seed=None):
     return rng or theano.sandbox.rng_mrg.MRG_RandomStreams(
         1 if seed is None else seed)
+
+def toposort(variables):
+    inputs = theano.gof.graph.inputs(variables)
+    nodes = theano.gof.graph.io_toposort(inputs, variables)
+    outputs = itertools.chain.from_iterable(node.outputs for node in nodes)
+    return [output for output in outputs if output in variables]
+
+def equizip(a, b):
+    a, b = list(a), list(b)
+    assert len(a) == len(b)
+    return zip(a, b)
+
+class Scope(object):
+    def __init__(self, **kwargs):
+        self._dikt = OrderedDict(**kwargs)
+
+    def __getattr__(self, key):
+        if key[0] == "_":
+            return self.__dict__[key]
+        else:
+            return self._dikt[key]
+
+    def __setattr__(self, key, value):
+        if key[0] == "_":
+            self.__dict__[key] = value
+        else:
+            self._dikt[key] = value
+
+    def __getitem__(self, key):
+        return self._dikt[key]
+
+    def __setitem__(self, key, value):
+        self._dikt[key] = value
+
+    def __len__(self):
+        return len(self._dikt)
+
+    def __iter__(self):
+        return iter(self._dikt)
+
+def the(xs):
+    assert len(xs) == 1
+    return xs[0]

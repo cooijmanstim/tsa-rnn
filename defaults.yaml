@@ -6,7 +6,6 @@ patience_epochs: 100
 max_epochs: 500
 batch_size: 100
 hidden_dim: 256
-response_dim: 128
 n_patches: 8
 patch_shape: [8, 8]
 #patch_cnn_spec:
@@ -24,7 +23,7 @@ patch_shape: [8, 8]
 patch_mlp_spec: [128]
 locate_mlp_spec: [64]
 merge_mlp_spec: [64]
-response_mlp_spec: []
+response_mlp_spec: [128]
 learning_rate: 0.0001
 batched_window: True
 cutoff: 3
