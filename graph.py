@@ -36,6 +36,13 @@ def add_transform(variables, transform, reason):
     logger.warning("tagging for %s transform %s: %s"
                    % (reason, transform, variables))
     for variable in variables:
+        if (not variable.owner and
+            not isinstance(variable, theano.tensor.TensorConstant)):
+            raise ValueError(
+                """transform input variable %s and enter a world of pain. """
+                """we will need to clone it to tag it as transformed, """
+                """after which you will lose your reference to it. try """
+                """something else.""" % variable)
         if not hasattr(variable.tag, "transforms"):
             variable.tag.transforms = dict()
         variable.tag.transforms.setdefault(reason, []).append(transform)
