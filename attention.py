@@ -211,13 +211,8 @@ class RecurrentAttentionModel(object):
             reason="regularization")
 
     def tag_recurrent_weight_noise(self, variables, rng=None, **hyperparameters):
-        from blocks.roles import WEIGHT
-        from blocks.filter import VariableFilter
-        bricks = self.rnn.transitions
-        variables = (VariableFilter(roles=[WEIGHT], bricks=bricks)
-                     (theano.gof.graph.ancestors(variables)))
-        variables = [var for var in variables
-                     if var.name.endswith("state")]
+        variables = [var for var in theano.gof.graph.ancestors(variables)
+                     if getattr(var, "weight_noise_goes_here", False)]
         graph.add_transform(
             variables,
             graph.WhiteNoiseTransform("recurrent_weight_noise", rng=rng),

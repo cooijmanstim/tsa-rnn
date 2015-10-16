@@ -77,12 +77,7 @@ def load_main_loop(main_loop, path):
     main_loop.log.status["training_started"] = False
 
 def dump_model_parameters(model, file):
-    np.savez(file,
-             **OrderedDict(
-                 (key, value.get_value())
-                 for key, value in model.get_parameter_dict().iteritems()))
+    np.savez(file, model.get_parameter_values())
 
 def load_model_parameters(model, file):
-    parameters = np.load(file)
-    parameters = OrderedDict(("/%s" % k, v) for (k, v) in parameters.items())
-    model.set_parameter_values(parameters)
+    model.set_parameter_values(np.load(file))
