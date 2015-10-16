@@ -1,4 +1,4 @@
-import logging
+import logging, numbers
 import theano.gof.graph
 import util
 
@@ -77,7 +77,7 @@ class DropoutTransform(object):
 
     def __call__(self, x, rng=None, **hyperparameters):
         p = hyperparameters[self.key]
-        if isinstance(p, float) and p <= 0:
+        if isinstance(p, numbers.Number) and p <= 0:
             return x
         mask = self.mask or util.get_dropout_mask(
             x.shape, p, rng=self.rng or rng)
@@ -93,7 +93,7 @@ class WhiteNoiseTransform(object):
 
     def __call__(self, x, rng, **hyperparameters):
         std = hyperparameters[self.key]
-        if isinstance(std, float) and std <= 0:
+        if isinstance(std, numbers.Number) and std <= 0:
             return x
         rng = self.rng or rng
         return x + rng.normal(x.shape, std=std, dtype=x.dtype)
