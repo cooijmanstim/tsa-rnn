@@ -230,7 +230,8 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
         cost=outputs["train"]["cost"],
         parameters=graphs["train"].parameters,
         step_rule=CompositeRule([StepClipping(1e1),
-                                 Adam(learning_rate=learning_rate)]))
+                                 Adam(learning_rate=learning_rate),
+                                 StepClipping(1e2)]))
     algorithm.add_updates(updates["train"])
 
     extensions.extend(construct_monitors(
