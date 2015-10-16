@@ -191,11 +191,8 @@ class RecurrentAttentionModel(object):
         scope.true_location, scope.true_scale = static_map_to_input_space(
             scope.raw_location, scope.raw_scale,
             patch_shape, image_shape)
-        # if the patch does not overlap with the image, this measures
-        # the gap (in each dimension)
-        scope.excursion = sum(map(util.rectify, (
-            -scope.true_location - patch_shape / scope.true_scale,
-             scope.true_location - patch_shape / scope.true_scale - image_shape)))
+        # measure the extent to which raw_location is outside the image
+        scope.excursion = util.rectify(abs(scope.raw_location) - 1)
 
     def tag_attention_dropout(self, variables, rng=None, **hyperparameters):
         from blocks.roles import INPUT
