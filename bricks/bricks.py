@@ -220,7 +220,7 @@ class BatchNormalization(bricks.Initializable, bricks.Feedforward):
         return theano.tensor.nnet.bn.batch_normalization(
             inputs=input_, gamma=gamma, beta=beta,
             mean=self.batch_stats["mean"],
-            std=T.sqrt(self.batch_stats["var"]) + 1e-8)
+            std=T.sqrt(self.batch_stats["var"] + 1e-8))
 
     @staticmethod
     def get_updates(variables):

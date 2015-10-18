@@ -150,7 +150,7 @@ def construct_graphs(task, n_patches, hyperparameters, **kwargs):
     emitter_outputs = emitter.emit(scopes[-1].rnn_outputs["states"], y, n_patches)
     emitter_cost = emitter_outputs.cost.copy(name="emitter_cost")
     # take abs to avoid sudden huge gradient
-    excursion_cost = sum(abs(scope.excursion) for scope in scopes).mean().copy(name="excursion_cost")
+    excursion_cost = sum(scope.excursion for scope in scopes).sum().copy(name="excursion_cost")
     cost = (emitter_cost + excursion_cost).copy(name="cost")
 
     # gather all the outputs we could possibly care about for training
