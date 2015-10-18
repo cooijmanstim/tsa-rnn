@@ -77,7 +77,7 @@ def load_main_loop(main_loop, path):
     main_loop.log.status["training_started"] = False
 
 def dump_model_parameters(model, file):
-    np.savez(file, model.get_parameter_values())
+    np.savez(file, **model.get_parameter_values())
 
 def load_model_parameters(model, file):
     model.set_parameter_values(np.load(file))
