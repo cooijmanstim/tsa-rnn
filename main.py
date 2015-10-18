@@ -198,9 +198,6 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
                         n_spatial_dims, n_patches, max_epochs,
                         patience_epochs, learning_rate,
                         hyperparameters, **kwargs):
-    name = "%s_%s" % (name, task_name)
-    hyperparameters["name"] = name
-
     task = tasks.get_task(**hyperparameters)
     hyperparameters["n_channels"] = task.n_channels
 
@@ -247,7 +244,7 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
         FinishIfNoImprovementAfter("best_valid_error_rate", epochs=patience_epochs),
         FinishAfter(after_n_epochs=max_epochs),
         DumpBest("best_valid_error_rate", name+"_best.zip"),
-        LightCheckpoint(name+"_checkpoint.zip", on_interrupt=False),
+        LightCheckpoint(hyperparameters["checkpoint_save_path"], on_interrupt=False),
         ProgressBar(), Timing(), Printing(), PrintingTo(name+"_log")])
 
     from blocks.main_loop import MainLoop
@@ -280,6 +277,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--hyperparameters", help="YAML file from which to load hyperparameters")
     parser.add_argument("--checkpoint", help="LightCheckpoint zipfile from which to resume training")
+    parser.add_argument("--autoresume", action="store_true", help="Resume from default checkpoint path or start training if it does not exist")
 
     args = parser.parse_args()
 
@@ -292,11 +290,19 @@ if __name__ == "__main__":
 
     hyperparameters["n_spatial_dims"] = len(hyperparameters["patch_shape"])
     hyperparameters["hyperparameters"] = hyperparameters
+    hyperparameters["name"] += hyperparameters["task_name"]
+    hyperparameters["checkpoint_save_path"] = hyperparameters["name"] + "_checkpoint.zip"
 
     main_loop = construct_main_loop(**hyperparameters)
 
-    if args.checkpoint:
-        dump.load_main_loop(main_loop, args.checkpoint)
+    checkpoint_path = None
+    if args.autoresume and os.path.exists(hyperparameters["checkpoint_save_path"]):
+        checkpoint_path = hyperparameters["checkpoint_save_path"]
+    elif args.checkpoint:
+        checkpoint_path = args.checkpoint
+    if checkpoint_path:
+        dump.load_main_loop(main_loop, checkpoint_path)
 
-    print "training..."
-    main_loop.run()
+    if not (args.autoresume and main_loop.log.current_row.get("training_finish_requested", False)):
+        print "training..."
+        main_loop.run()
