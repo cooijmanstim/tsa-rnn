@@ -2,6 +2,7 @@ import logging
 import numpy as np
 import theano, theano.tensor as T
 from blocks.bricks.base import application
+import blocks.bricks.conv as conv2d, conv3d
 import util, bricks, initialization, masonry, graph
 
 logger = logging.getLogger(__name__)
@@ -198,8 +199,10 @@ class RecurrentAttentionModel(object):
         from blocks.roles import INPUT
         from blocks.filter import VariableFilter
         bricks_ = [brick for brick in
-                   util.all_bricks([self.embedder, self.patch_transform])
-                   if isinstance(brick, bricks.Linear)]
+                   util.all_bricks([self.patch_transform])
+                   if isinstance(brick, (bricks.Linear,
+                                         conv2d.Convolutional,
+                                         conv3d.Convolutional))]
         variables = (VariableFilter(roles=[INPUT], bricks=bricks_)
                      (theano.gof.graph.ancestors(variables)))
         graph.add_transform(
