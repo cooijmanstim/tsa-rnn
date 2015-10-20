@@ -28,5 +28,7 @@ class JpegVideoDataset(fuel.datasets.H5PYDataset):
 
     def load_frame(self, jpeg):
         image = Image.open(StringIO(jpeg.tostring()))
-        image = np.array(image).astype(np.float32) / 255.0
+        image = (np.array(image.getdata(), dtype=np.float32)
+                 .reshape((image.size[1], image.size[0])))
+	image /= 255.0
         return image
