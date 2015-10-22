@@ -290,7 +290,7 @@ if __name__ == "__main__":
 
     hyperparameters["n_spatial_dims"] = len(hyperparameters["patch_shape"])
     hyperparameters["hyperparameters"] = hyperparameters
-    hyperparameters["name"] += hyperparameters["task_name"]
+    hyperparameters["name"] += "_" + hyperparameters["task_name"]
     hyperparameters["checkpoint_save_path"] = hyperparameters["name"] + "_checkpoint.zip"
 
     main_loop = construct_main_loop(**hyperparameters)
