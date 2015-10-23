@@ -187,3 +187,15 @@ class Scope(object):
 def the(xs):
     assert len(xs) == 1
     return xs[0]
+
+def annotated_by_a(klass, var):
+    return any(isinstance(annotation, klass) or
+               (hasattr(annotation, "brick") and
+                isinstance(annotation.brick, klass))
+               for annotation in getattr(var.tag, "annotations", []))
+
+def get_convolution_classes():
+    from blocks.bricks import conv as conv2d
+    import conv3d
+    return (conv2d.Convolutional,
+            conv3d.Convolutional)

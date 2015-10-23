@@ -62,6 +62,19 @@ def construct_monitors(algorithm, task, model, graphs, outputs,
                 channels.append(getattr(outputs[which_set][key], stat)(axis=1)
                                 .copy(name="%s.%s" % (key, stat)))
         if which_set == "train":
+            if True:
+                from blocks.roles import has_roles, OUTPUT
+                cnn_outputs = OrderedDict()
+                for var in theano.gof.graph.ancestors(graphs[which_set].outputs):
+                    if (has_roles(var, [OUTPUT]) and util.annotated_by_a(
+                            util.get_convolution_classes(), var)):
+                        cnn_outputs.setdefault(util.get_path(var), []).append(var)
+                for path, vars in cnn_outputs.items():
+                    vars = util.dedup(vars, equal=util.equal_computations)
+                    for i, var in enumerate(vars):
+                        channels.append(var.mean().copy(
+                            name="activation[%i].mean:%s" % (i, path)))
+
             channels.append(algorithm.total_gradient_norm.copy(name="total_gradient_norm"))
         extensions.append(DataStreamMonitoring(
             channels, prefix=which_set, after_epoch=True,
