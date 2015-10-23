@@ -39,14 +39,9 @@ class PatchMonitoring(SimpleExtension):
         npatches = patchess.shape[1]
         patch_shape = patchess.shape[-2:]
 
-        if images.shape[1] == 1:
-            # remove degenerate channel axis because pyplot rejects it
-            images = np.squeeze(images, axis=1)
-            patchess = np.squeeze(patchess, axis=2)
-        else:
-            # move channel axis to the end because pyplot wants this
-            images = np.rollaxis(images, 1, images.ndim)
-            patchess = np.rollaxis(patchess, 2, patchess.ndim)
+        # move channel axis to the end because pyplot wants this
+        images = np.rollaxis(images, 1, images.ndim)
+        patchess = np.rollaxis(patchess, 2, patchess.ndim)
 
         outer_grid = gridspec.GridSpec(batch_size, 2,
                                        width_ratios=[1, npatches])
@@ -122,14 +117,9 @@ class VideoPatchMonitoring(SimpleExtension):
 
         patch_shape = patchess.shape[-3:]
 
-        if videos.shape[1] == 1:
-            # remove degenerate channel axis because pyplot rejects it
-            videos = np.squeeze(videos, axis=1)
-            patchess = np.squeeze(patchess, axis=2)
-        else:
-            # move channel axis to the end because pyplot wants this
-            videos = np.rollaxis(videos, 1, videos.ndim)
-            patchess = np.rollaxis(patchess, 2, patchess.ndim)
+        # move channel axis to the end
+        videos = np.rollaxis(videos, 1, videos.ndim)
+        patchess = np.rollaxis(patchess, 2, patchess.ndim)
 
         outer_grid = gridspec.GridSpec(2, 1)
         for i, (video, video_shape, patches, locations, scales) in enumerate(
@@ -140,9 +130,10 @@ class VideoPatchMonitoring(SimpleExtension):
 
             video_ax = plt.subplot(outer_grid[0, 0])
             video_image = (video
-                           .transpose(1, 0, 2)
+                           .transpose(1, 0, 2, 3)
                            .reshape((video.shape[1],
-                                     video.shape[0] * video.shape[2])))
+                                     video.shape[0] * video.shape[2],
+                                     video.shape[3])))
             self.imshow(video_image, axes=video_ax, vmin=vmin, vmax=vmax)
             video_ax.axis("off")
 
@@ -153,9 +144,10 @@ class VideoPatchMonitoring(SimpleExtension):
 
             patch_ax = plt.subplot(outer_grid[1, 0])
             patch_image = (patches
-                           .transpose(0, 2, 1, 3)
+                           .transpose(0, 2, 1, 3, 4)
                            .reshape((patches.shape[0]*patches.shape[2],
-                                     patches.shape[1]*patches.shape[3])))
+                                     patches.shape[1]*patches.shape[3],
+                                     patches.shape[4])))
             self.imshow(patch_image, axes=patch_ax, vmin=vmin, vmax=vmax)
             patch_ax.axis("off")
             patch_ax.set_title("\n".join(map(str, (true_locations.T, true_scales.T))),
@@ -186,7 +178,11 @@ class VideoPatchMonitoring(SimpleExtension):
             plt.close()
 
     def imshow(self, image, *args, **kwargs):
-        kwargs.setdefault("cmap", "gray")
+        # remove degenerate channel axis
+        if image.ndim == 3 and image.shape[-1] == 1:
+            image = np.squeeze(videos, axis=image.ndim - 1)
+        if image.ndim == 2:
+            kwargs.setdefault("cmap", "gray")
         kwargs.setdefault("aspect", "equal")
         kwargs.setdefault("interpolation", "none")
         kwargs.setdefault("vmin", 0.0)
