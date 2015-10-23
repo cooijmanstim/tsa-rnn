@@ -263,8 +263,8 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
 
     from tabulate import tabulate
     print "parameter sizes:"
-    print tabulate((key, value.get_value().size) for key, value in
-                   main_loop.model.get_parameter_dict().items())
+    print tabulate((key, "x".join(map(str, value.get_value().shape)), value.get_value().size)
+                   for key, value in main_loop.model.get_parameter_dict().items())
 
     return main_loop
 
