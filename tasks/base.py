@@ -35,23 +35,24 @@ class Classification(object):
 
     def load_datasets(self):
         raise NotImplementedError()
-        
-    def apply_default_transformers(self, stream):
+
+    def apply_default_transformers(self, stream, monitor=False):
         return stream
 
     def get_stream_num_examples(self, which_set, monitor):
         return (self.datasets[which_set].num_examples
                 / self.shrink_dataset_by)
 
-    def get_stream(self, which_set, shuffle=True, monitor=False, num_examples=None, center=True):
+    def get_scheme(self, which_set, shuffle=True, monitor=False, num_examples=None):
         scheme_klass = ShuffledScheme if shuffle else SequentialScheme
+        return scheme_klass(num_examples, self.batch_size)
+
+    def get_stream(self, which_set, shuffle=True, monitor=False, num_examples=None, center=True):
         if num_examples is None:
             num_examples = self.get_stream_num_examples(which_set, monitor=monitor)
-        scheme = scheme_klass(num_examples, self.batch_size)
-        stream = DataStream.default_stream(
-            dataset=self.datasets[which_set],
-            iteration_scheme=scheme)
-        stream = self.apply_default_transformers(stream)
+        scheme = self.get_scheme(which_set, shuffle=shuffle, monitor=monitor, num_examples=num_examples)
+        stream = DataStream.default_stream(dataset=self.datasets[which_set], iteration_scheme=scheme)
+        stream = self.apply_default_transformers(stream, monitor=monitor)
         stream = Canonicalize(stream, mapping=self.preprocess)
         if center:
             stream = transformers.Mapping(stream, mapping=self.center)
