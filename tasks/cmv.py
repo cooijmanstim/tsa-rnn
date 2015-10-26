@@ -25,7 +25,6 @@ class Task(tasks.Classification):
         return super(Task, self).get_stream_num_examples(which_set, monitor)
 
     def compute_batch_mean(self, x, x_shape):
-        return 0.
         # average over time first
         time = 2
         mean_frame = x.sum(axis=time, keepdims=True)
@@ -41,3 +40,6 @@ class Task(tasks.Classification):
         return (x.astype(np.float32),
                 x_shape.astype(np.float32),
                 y.astype(np.uint8))
+
+    def center(self, data):
+        return data

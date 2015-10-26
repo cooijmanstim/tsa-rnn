@@ -64,6 +64,9 @@ class Task(tasks.Classification):
                 x_shape.astype(np.float32),
                 y.astype(np.uint8))
 
+    def center(self, data):
+        return data
+
 
 import os.path
 import cPickle as pkl
