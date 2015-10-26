@@ -180,7 +180,7 @@ class VideoPatchMonitoring(SimpleExtension):
     def imshow(self, image, *args, **kwargs):
         # remove degenerate channel axis
         if image.ndim == 3 and image.shape[-1] == 1:
-            image = np.squeeze(videos, axis=image.ndim - 1)
+            image = np.squeeze(image, axis=image.ndim - 1)
         if image.ndim == 2:
             kwargs.setdefault("cmap", "gray")
         kwargs.setdefault("aspect", "equal")
