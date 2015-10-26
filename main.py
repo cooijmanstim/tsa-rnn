@@ -251,13 +251,14 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
     from blocks.extensions import FinishAfter, Printing, ProgressBar, Timing
     from blocks.extensions.stopping import FinishIfNoImprovementAfter
     from blocks.extensions.training import TrackTheBest
+    from blocks.extensions.saveload import Checkpoint
     from dump import DumpBest, LightCheckpoint, PrintingTo
     extensions.extend([
         TrackTheBest("valid_error_rate", "best_valid_error_rate"),
         FinishIfNoImprovementAfter("best_valid_error_rate", epochs=patience_epochs),
         FinishAfter(after_n_epochs=max_epochs),
         DumpBest("best_valid_error_rate", name+"_best.zip"),
-        LightCheckpoint(hyperparameters["checkpoint_save_path"], on_interrupt=False),
+        Checkpoint(hyperparameters["checkpoint_save_path"], on_interrupt=False, every_n_epochs=5, use_cpickle=True),
         ProgressBar(), Timing(), Printing(), PrintingTo(name+"_log")])
 
     from blocks.main_loop import MainLoop
@@ -289,7 +290,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--hyperparameters", help="YAML file from which to load hyperparameters")
-    parser.add_argument("--checkpoint", help="LightCheckpoint zipfile from which to resume training")
+    parser.add_argument("--checkpoint", help="Checkpoint file from which to resume training")
     parser.add_argument("--autoresume", action="store_true", help="Resume from default checkpoint path or start training if it does not exist")
 
     args = parser.parse_args()
@@ -304,9 +305,7 @@ if __name__ == "__main__":
     hyperparameters["n_spatial_dims"] = len(hyperparameters["patch_shape"])
     hyperparameters["hyperparameters"] = hyperparameters
     hyperparameters["name"] += "_" + hyperparameters["task_name"]
-    hyperparameters["checkpoint_save_path"] = hyperparameters["name"] + "_checkpoint.zip"
-
-    main_loop = construct_main_loop(**hyperparameters)
+    hyperparameters["checkpoint_save_path"] = hyperparameters["name"] + "_checkpoint"
 
     checkpoint_path = None
     if args.autoresume and os.path.exists(hyperparameters["checkpoint_save_path"]):
@@ -314,7 +313,10 @@ if __name__ == "__main__":
     elif args.checkpoint:
         checkpoint_path = args.checkpoint
     if checkpoint_path:
-        dump.load_main_loop(main_loop, checkpoint_path)
+        from blocks.serialization import load
+        main_loop = load(checkpoint_path)
+    else:
+        main_loop = construct_main_loop(**hyperparameters)
 
     if not (args.autoresume and main_loop.log.current_row.get("training_finish_requested", False)):
         print "training..."
