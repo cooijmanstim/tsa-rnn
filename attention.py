@@ -128,10 +128,10 @@ class RecurrentAttentionModel(object):
             # normalize columns because the fan-in is large
             weights_init=initialization.NormalizedInitialization(
                 initialization.IsotropicGaussian()),
-            # initialize location biases to zero and scale biases to one
-            # so the model will zoom in by default
+            # initialize location biases to zero and scale biases to a
+            # positive value so the model will zoom in by default
             biases_init=initialization.Constant(np.array(
-                [0.] * n_spatial_dims + [1.] * n_spatial_dims)))
+                [0.] * n_spatial_dims + [.1] * n_spatial_dims)))
 
         self.children.extend([
             self.locate_mlp,
