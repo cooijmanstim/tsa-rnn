@@ -40,7 +40,7 @@ def construct_monitors(algorithm, task, model, graphs, outputs,
     if True:
         data_independent_channels = []
         for parameter in graphs["train"].parameters:
-            if parameter.name in "gamma beta".split():
+            if parameter.name in "gamma beta W b".split():
                 quantity = parameter.mean()
                 quantity.name = "parameter:%s.mean" % util.get_path(parameter)
                 data_independent_channels.append(quantity)
