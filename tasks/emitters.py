@@ -26,7 +26,7 @@ class SingleSoftmax(object):
         for child in self.children:
             child.initialize()
 
-    def emit(self, x, y, n_patches):
+    def emit(self, x, y):
         energy = self.mlp.apply(x)
         cross_entropy = self.softmax.categorical_cross_entropy(
             y.flatten(), energy).mean(axis=0)

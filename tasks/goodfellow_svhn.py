@@ -39,7 +39,7 @@ class Emitter(object):
         for child in self.children:
             child.initialize()
 
-    def emit(self, x, y, n_patches):
+    def emit(self, x, y):
         max_length = len(self.n_classes) - 1
         _length_masks = theano.shared(
             np.tril(np.ones((max_length, max_length), dtype='int8')),

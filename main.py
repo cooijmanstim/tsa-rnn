@@ -160,7 +160,7 @@ def construct_graphs(task, n_patches, hyperparameters, **kwargs):
         **hyperparameters)
     emitter.initialize()
 
-    emitter_outputs = emitter.emit(scopes[-1].rnn_outputs["states"], y, n_patches)
+    emitter_outputs = emitter.emit(scopes[-1].rnn_outputs["states"], y)
     emitter_cost = emitter_outputs.cost.copy(name="emitter_cost")
     excursion_cost = (T.stack([scope.excursion for scope in scopes])
                       .mean().copy(name="excursion_cost"))
