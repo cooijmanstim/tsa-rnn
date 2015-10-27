@@ -225,8 +225,6 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
             hyperparameters["%s_decay" % key],
             after_batch=True))
 
-    theano.config.compute_test_value = "warn"
-
     print "constructing graphs..."
     graphs, outputs, updates = construct_graphs(task=task, **hyperparameters)
 
