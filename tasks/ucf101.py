@@ -1,11 +1,28 @@
-import os
+import os, logging
 import numpy as np
 
 import tasks
 import datasets
 
+logger = logging.getLogger(__name__)
+
+def _preprocess(self, data):
+    x, y = data
+    x = np.asarray(x)
+    # move channel axis to just after batch axis
+    x = np.rollaxis(x, x.ndim - 1, 1)
+    x_shape = np.tile([x.shape[2:]], (x.shape[0], 1))
+    return (x.astype(np.float32),
+            x_shape.astype(np.float32),
+            y.astype(np.uint8))
+
+def _center(self, data):
+    return data
+
 class Task(tasks.Classification):
     name = "ucf101"
+    preprocess = _preprocess
+    center = _center
 
     def __init__(self, *args, **kwargs):
         super(Task, self).__init__(*args, **kwargs)
@@ -53,19 +70,6 @@ class Task(tasks.Classification):
         mean_frame = x.sum(axis=time, keepdims=True)
         mean_frame /= x_shape[:, np.newaxis, [time], np.newaxis, np.newaxis]
         return mean_frame.mean(axis=0, keepdims=True)
-
-    def preprocess(self, data):
-        x, y = data
-        x = np.asarray(x)
-        # move channel axis to just after batch axis
-        x = np.rollaxis(x, x.ndim - 1, 1)
-        x_shape = np.tile([x.shape[2:]], (x.shape[0], 1))
-        return (x.astype(np.float32),
-                x_shape.astype(np.float32),
-                y.astype(np.uint8))
-
-    def center(self, data):
-        return data
 
 
 import os.path

@@ -20,8 +20,17 @@ def augment((videos, targets)):
               for video, offset in zip(videos, offsets)]
     return videos, targets
 
+def _preprocess(self, data):
+    x, x_shape, y = data
+    # introduce channel axis
+    x = x[:, np.newaxis, ...]
+    return (x.astype(np.float32),
+            x_shape.astype(np.float32),
+            y.astype(np.uint8))
+
 class Task(tasks.Classification):
     name = "kth"
+    preprocess = _preprocess
 
     def __init__(self, *args, **kwargs):
         super(Task, self).__init__(*args, **kwargs)
@@ -54,11 +63,3 @@ class Task(tasks.Classification):
         mean_frame = x.sum(axis=time, keepdims=True)
         mean_frame /= x_shape[:, np.newaxis, [time], np.newaxis, np.newaxis]
         return mean_frame.mean(axis=0, keepdims=True)
-
-    def preprocess(self, data):
-        x, x_shape, y = data
-        # introduce channel axis
-        x = x[:, np.newaxis, ...]
-        return (x.astype(np.float32),
-                x_shape.astype(np.float32),
-                y.astype(np.uint8))

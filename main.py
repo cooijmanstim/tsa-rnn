@@ -220,10 +220,10 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
     from blocks.extensions.training import SharedVariableModifier
     for key in "location_std scale_std".split():
         hyperparameters[key] = theano.shared(hyperparameters[key], name=key)
-        rate = hyperparameters["%s_decay" % key]
-        extensions.append(SharedVariableModifier(
+        extensions.append(util.ExponentialDecay(
             hyperparameters[key],
-            lambda i, x: rate * x))
+            hyperparameters["%s_decay" % key],
+            after_batch=True))
 
     theano.config.compute_test_value = "warn"
 
@@ -258,7 +258,9 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
         FinishIfNoImprovementAfter("best_valid_error_rate", epochs=patience_epochs),
         FinishAfter(after_n_epochs=max_epochs),
         DumpBest("best_valid_error_rate", name+"_best.zip"),
-        Checkpoint(hyperparameters["checkpoint_save_path"], on_interrupt=False, every_n_epochs=5, use_cpickle=True),
+        Checkpoint(hyperparameters["checkpoint_save_path"],
+                   on_interrupt=False, every_n_epochs=5,
+                   before_training=True, use_cpickle=True),
         ProgressBar(), Timing(), Printing(), PrintingTo(name+"_log")])
 
     from blocks.main_loop import MainLoop

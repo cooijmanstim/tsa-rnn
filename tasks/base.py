@@ -1,12 +1,11 @@
-import os
-import logging
+import os, logging, functools
 import numpy as np
 import theano.tensor as T
 from blocks.filter import VariableFilter
 from fuel.streams import DataStream
 from fuel.schemes import ShuffledScheme, SequentialScheme
 from fuel import transformers
-import emitters
+import emitters, util
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +26,24 @@ class Canonicalize(transformers.Transformer):
     def transform_batch(self, batch):
         return self.mapping(batch)
 
+def _preprocess(self, data):
+    return data
+
+def _center(self, data):
+    x, x_shape, y = data
+    mean = self.get_mean()
+    masks = np.zeros_like(x)
+    for i, shape in enumerate(x_shape):
+        masks[np.index_exp[i, :] + tuple(map(slice, shape))] = 1
+    x_centered = x - masks * mean
+    return x_centered, x_shape, y
+
 class Classification(object):
-    def __init__(self, batch_size, hidden_dim, shrink_dataset_by=1, **kwargs):
+    preprocess = _preprocess
+    center = _center
+
+    @util.checkargs
+    def __init__(self, batch_size, shrink_dataset_by=1, **kwargs):
         self.shrink_dataset_by = shrink_dataset_by
         self.batch_size = batch_size
         self.datasets = self.load_datasets()
@@ -53,9 +68,9 @@ class Classification(object):
         scheme = self.get_scheme(which_set, shuffle=shuffle, monitor=monitor, num_examples=num_examples)
         stream = DataStream.default_stream(dataset=self.datasets[which_set], iteration_scheme=scheme)
         stream = self.apply_default_transformers(stream, monitor=monitor)
-        stream = Canonicalize(stream, mapping=self.preprocess)
+        stream = Canonicalize(stream, mapping=util.rebind(self.preprocess))
         if center:
-            stream = transformers.Mapping(stream, mapping=self.center)
+            stream = transformers.Mapping(stream, mapping=util.rebind(self.center))
         return stream
 
     def get_variables(self):
@@ -80,15 +95,6 @@ class Classification(object):
     def plot_channels(self):
         return [["%s_%s" % (which_set, name) for which_set in self.datasets.keys()]
                 for name in "cross_entropy error_rate".split()]
-        
-    def center(self, data):
-        x, x_shape, y = data
-        mean = self.get_mean()
-        masks = np.zeros_like(x)
-        for i, shape in enumerate(x_shape):
-            masks[np.index_exp[i, :] + tuple(map(slice, shape))] = 1
-        x_centered = x - masks * mean
-        return x_centered, x_shape, y
 
     def get_mean(self):
         cache_dir = os.environ["PREPROCESS_CACHE"]

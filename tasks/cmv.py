@@ -1,11 +1,25 @@
 import os
 import numpy as np
 
-import tasks
-import datasets
+import tasks, util, datasets
+
+def _canonicalize(self, data):
+    x, y = data
+    x = np.asarray(x)
+    # introduce channel axis
+    x = np.expand_dims(x, axis=1)
+    x_shape = np.tile([x.shape[2:]], (x.shape[0], 1))
+    return (x.astype(np.float32),
+            x_shape.astype(np.float32),
+            y.astype(np.uint8))
+
+def _center(self, data):
+    return data
 
 class Task(tasks.Classification):
     name = "cmv"
+    canonicalize = _canonicalize
+    center = _center
 
     def __init__(self, *args, **kwargs):
         super(Task, self).__init__(*args, **kwargs)
@@ -30,16 +44,3 @@ class Task(tasks.Classification):
         mean_frame = x.sum(axis=time, keepdims=True)
         mean_frame /= x_shape[:, np.newaxis, [time], np.newaxis, np.newaxis]
         return mean_frame.mean(axis=0, keepdims=True)
-
-    def preprocess(self, data):
-        x, y = data
-        x = np.asarray(x)
-        # introduce channel axis
-        x = np.expand_dims(x, axis=1)
-        x_shape = np.tile([x.shape[2:]], (x.shape[0], 1))
-        return (x.astype(np.float32),
-                x_shape.astype(np.float32),
-                y.astype(np.uint8))
-
-    def center(self, data):
-        return data

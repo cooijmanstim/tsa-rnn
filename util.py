@@ -199,3 +199,18 @@ def get_convolution_classes():
     import conv3d
     return (conv2d.Convolutional,
             conv3d.Convolutional)
+
+# make instance methods picklable -_-
+def rebind(f):
+    from functools import partial
+    return partial(f.__func__, f.__self__)
+
+from blocks.extensions import SimpleExtension
+class ExponentialDecay(SimpleExtension):
+    def __init__(self, parameter, rate, **kwargs):
+        super(ExponentialDecay, self).__init__(**kwargs)
+        self.parameter = parameter
+        self.rate = rate
+
+    def do(self, which_callback, *args):
+        self.parameter.set_value(self.rate * self.parameter.get_value())

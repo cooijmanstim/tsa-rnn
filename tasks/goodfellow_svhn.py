@@ -96,8 +96,40 @@ class Emitter(object):
             graph.DropoutTransform("classifier_dropout", rng=rng),
             reason="regularization")
 
+def _preprocess(self, data):
+    x, y = data
+
+    x = np.float32(x) / 255.0
+    x = x.mean(axis=3, keepdims=True) # grayscale
+    # move channel axis forward
+    x = np.rollaxis(x, 3, 1)
+
+    # crop images randomly
+    assert(x.shape[2] == x.shape[3])
+    image_size = x.shape[2]
+    crop_size = 54
+    a = np.random.randint(0, image_size - crop_size, size=(2,))
+    b = a + crop_size
+    x = x[:, :, a[0]:b[0], a[1]:b[1]]
+
+    y = np.array(y, copy=True)
+    # use zero to represent zero
+    y[y == 10] = 0
+    lengths = (y >= 0).sum(axis=1)
+    y[y < 0] = 0
+    # pretend there are no examples with length > 5 (there are too few to care about)
+    lengths = np.clip(lengths, 0, 5)
+    # repurpose the last column to store 0-based lenghts
+    y[:, -1] = lengths - 1
+
+    x_shape = np.tile([x.shape[2:]], (x.shape[0], 1))
+    return (x.astype(np.float32),
+            x_shape.astype(np.float32),
+            y.astype(np.uint8))
+
 class NumberTask(tasks.Classification):
     name = "svhn_number"
+    preprocess = _preprocess
 
     def __init__(self, *args, **kwargs):
         super(NumberTask, self).__init__(*args, **kwargs)
@@ -128,34 +160,3 @@ class NumberTask(tasks.Classification):
     def plot_channels(self):
         return [["%s_%s" % (which_set, name) for which_set in self.datasets.keys()]
                 for name in "cross_entropy error_rate".split()]
-
-    def preprocess(self, data):
-        x, y = data
-
-        x = np.float32(x) / 255.0
-        x = x.mean(axis=3, keepdims=True) # grayscale
-        # move channel axis forward
-        x = np.rollaxis(x, 3, 1)
-
-        # crop images randomly
-        assert(x.shape[2] == x.shape[3])
-        image_size = x.shape[2]
-        crop_size = 54
-        a = np.random.randint(0, image_size - crop_size, size=(2,))
-        b = a + crop_size
-        x = x[:, :, a[0]:b[0], a[1]:b[1]]
-
-        y = np.array(y, copy=True)
-        # use zero to represent zero
-        y[y == 10] = 0
-        lengths = (y >= 0).sum(axis=1)
-        y[y < 0] = 0
-        # pretend there are no examples with length > 5 (there are too few to care about)
-        lengths = np.clip(lengths, 0, 5)
-        # repurpose the last column to store 0-based lenghts
-        y[:, -1] = lengths - 1
-
-        x_shape = np.tile([x.shape[2:]], (x.shape[0], 1))
-        return (x.astype(np.float32),
-                x_shape.astype(np.float32),
-                y.astype(np.uint8))
