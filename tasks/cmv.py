@@ -21,15 +21,18 @@ class Task(tasks.Classification):
     canonicalize = _canonicalize
     center = _center
 
-    def __init__(self, *args, **kwargs):
-        super(Task, self).__init__(*args, **kwargs)
+    @util.checkargs
+    def __init__(self, video_shape, **kwargs):
         self.n_channels = 1
         self.n_classes = 10
+        self.video_shape = video_shape
+        super(Task, self).__init__(**kwargs)
 
     def load_datasets(self):
+        filename = "cmv%s_jpeg.hdf5" % "x".join(map(str, self.video_shape))
         return dict(
             (which_set, datasets.JpegVideoDataset(
-                path=os.environ["CMV_JPEG_HDF5"],
+                path=os.path.join(os.environ["CMV_DATADIR"], filename),
                 which_set=which_set))
             for which_set in "train valid test".split())
 

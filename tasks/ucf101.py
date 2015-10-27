@@ -834,7 +834,6 @@ class JpegHDF5Transformer(Transformer) :
                 img = Image.open(data)
                 if (img.size[0] != self.input_size[1] and
                     img.size[1] != self.input_size[0]):
-                    print 'here'
                     img = img.resize((int(self.input_size[1]),
                                       int(self.input_size[0])), Image.ANTIALIAS)
 
