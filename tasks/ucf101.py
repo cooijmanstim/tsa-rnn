@@ -29,7 +29,7 @@ class Task(tasks.Classification):
         self.n_channels = 3
         self.n_classes = 101
         for key in ("data_subsample data_random_subsample data_nb_frames "
-                    "data_input_size data_crop_size translate_labels".split()):
+                    "data_input_size data_crop_size data_crop_type translate_labels".split()):
             setattr(self, key, kwargs[key])
 
     def load_datasets(self):
@@ -54,7 +54,7 @@ class Task(tasks.Classification):
             input_size=self.data_input_size, crop_size=self.data_crop_size,
             translate_labels=self.translate_labels,
             nb_frames=self.data_nb_frames,
-            crop_type='center' if monitor else 'random',
+            crop_type='center' if monitor else self.data_crop_type,
             flip='noflip' if monitor else 'random',
             data_stream=stream)
 
@@ -692,13 +692,14 @@ from StringIO import StringIO
 
 from fuel import config
 from fuel.transformers import Transformer
-
 class JpegHDF5Transformer(Transformer) :
     produces_examples = False
 
     """
     Decode jpeg and perform spatial crop if needed
+
     if input_size == crop_size, no crop is done
+
     input_size: spatially resize the input to that size
     crop_size: take a crop of that size out of the inputs
     nb_channels: number of channels of the inputs
@@ -707,6 +708,7 @@ class JpegHDF5Transformer(Transformer) :
     crop_type: random, corners or center type of cropping
     scale: pixel values are scale into the range [0, scale]
     nb_frames: maximum number of frame (will be zero padded)
+
     """
     def __init__(self,
                  input_size=(240, 320),
@@ -739,6 +741,10 @@ class JpegHDF5Transformer(Transformer) :
         self.translate_labels = translate_labels
         self.data_sources = ('targets', 'images')
 
+        ### multi-scale
+        self.scales =  [256, 224, 192, 168]
+
+
         ### Crop coordinate
         self.crop_type = crop_type
         self.centers = np.array(input_size) / 2.0
@@ -755,7 +761,9 @@ class JpegHDF5Transformer(Transformer) :
         ### Value checks
         assert self.crop_type in  ['center', 'corners', 'random',
                                    'upleft', 'downleft',
-                                   'upright', 'downright']
+                                   'upright', 'downright',
+                                   'random_multiscale',
+                                   'corners_multiscale']
 
         assert self.flip in ['random', 'flip', 'noflip']
         assert self.crop_size[0] <= self.input_size[0]
@@ -763,36 +771,78 @@ class JpegHDF5Transformer(Transformer) :
         assert self.nchannels >= 1
 
 
-    def crop(self):
+    def multiscale_crop(self):
+        scale_x = self.rng.randint(0, len(self.scales))
+        scale_y = self.rng.randint(0, len(self.scales))
+        crop_size = (self.scales[scale_x], self.scales[scale_y])
+
+        centers_crop = (self.centers[0] - crop_size[0] / 2.0,
+                        self.centers[1] - crop_size[1] / 2.0)
+        corners = []
+        corners.append((0, 0))
+        corners.append((0, self.input_size[1] - crop_size[1]))
+        corners.append((self.input_size[0] - crop_size[0], 0))
+        corners.append((self.input_size[0] - crop_size[0],
+                             self.input_size[1] - crop_size[1]))
+        corners.append(centers_crop)
+        return corners, crop_size
+
+
+
+
+    def get_crop_coord(self, crop_size, corners):
         x_start = 0
         y_start = 0
 
+
         corner_rng = self.rng.randint(0, 5)
-        if self.crop_type == 'center':
-            x_start = self.centers_crop[0]
-            y_start = self.centers_crop[1]
-        elif self.crop_type == 'random':
-            if self.crop_size[0] < self.input_size[0]:
-                x_start = self.rng.randint(0, self.input_size[0]-self.crop_size[0])
-                y_start = self.rng.randint(0, self.input_size[1]-self.crop_size[1])
-        elif self.crop_type == 'corners':
-            x_start = self.corners[corner_rng][0]
-            y_start = self.corners[corner_rng][1]
+        if ((self.crop_type == 'random' or
+             self.crop_type == 'random_multiscale')):
+            if crop_size[0] <= self.input_size[0]:
+                if crop_size[0] == self.input_size[0]:
+                    x_start = 0
+                else:
+                    x_start = self.rng.randint(0,
+                                               self.input_size[0]-crop_size[0])
+                if crop_size[1] == self.input_size[1]:
+                    y_start = 0
+                else:
+                    y_start = self.rng.randint(0,
+                                               self.input_size[1]-crop_size[1])
+        elif ((self.crop_type == 'corners' or
+               self.crop_type == 'corners_multiscale')):
+            x_start = corners[corner_rng][0]
+            y_start = corners[corner_rng][1]
         elif self.crop_type == 'upleft':
-            x_start = self.corners[0][0]
-            y_start = self.corners[0][1]
+            x_start = corners[0][0]
+            y_start = corners[0][1]
         elif self.crop_type == 'upright':
-            x_start = self.corners[1][0]
-            y_start = self.corners[1][1]
+            x_start = corners[1][0]
+            y_start = corners[1][1]
         elif self.crop_type == 'downleft':
-            x_start = self.corners[2][0]
-            y_start = self.corners[2][1]
+            x_start = corners[2][0]
+            y_start = corners[2][1]
         elif self.crop_type == 'downright':
-            x_start = self.corners[3][0]
-            y_start = self.corners[3][1]
+            x_start = corners[3][0]
+            y_start = corners[3][1]
+        elif self.crop_type == 'center':
+            x_start = corners[4][0]
+            y_start = corners[4][1]
         else:
             raise ValueError
         return x_start, y_start
+
+    def crop(self):
+        if ((self.crop_type == 'random_multiscale' or
+             self.crop_type == 'corners_multiscale')):
+            corners, crop_size = self.multiscale_crop()
+        else:
+            corners, crop_size = self.corners, self.crop_size
+
+        x_start, y_start = self.get_crop_coord(crop_size, corners)
+        bbox = (int(y_start), int(x_start),
+                int(y_start+crop_size[1]), int(x_start+crop_size[0]))
+        return bbox
 
 
     def get_data(self, request=None):
@@ -802,8 +852,6 @@ class JpegHDF5Transformer(Transformer) :
         batch = next(self.child_epoch_iterator)
         images, labels = self.preprocess_data(batch)
         timers2 = time.time()
-        #print "Returned a minibatch", time.time() - timer, "sec(s)", images[0].shape
-
         return images, labels
 
 
@@ -825,7 +873,8 @@ class JpegHDF5Transformer(Transformer) :
             else:
                 y[i] = batch[1][i*fpv]
             do_flip = self.rng.rand(1)[0]
-            x_start, y_start = self.crop()
+            bbox = self.crop()
+
             for j in xrange(fpv):
                 data = data_array[i*fpv+j]
                 #this data was stored in uint8
@@ -835,27 +884,22 @@ class JpegHDF5Transformer(Transformer) :
                 if (img.size[0] != self.input_size[1] and
                     img.size[1] != self.input_size[0]):
                     img = img.resize((int(self.input_size[1]),
-                                      int(self.input_size[0])), Image.ANTIALIAS)
-
-                imgs = np.array(img)
-                img = (np.array(img).astype(np.float32) / 255.0) * self.scale
-                #if self.mean is not None:
-                #    img -= self.mean
-                # import cv2
-                # cv2.imshow('img', imgs)
-                # #cv2.waitKey(0)
+                                      int(self.input_size[0])),
+                                     Image.ANTIALIAS)
+                img = img.crop(bbox)
+                img = img.resize((int(self.crop_size[1]),
+                                  int(self.crop_size[0])),
+                                 Image.ANTIALIAS)
+                # cv2.imshow('img', np.array(img))
+                # cv2.waitKey(0)
                 # cv2.destroyAllWindows()
-                # print y[i]
-
-
-
+                img = (np.array(img).astype(np.float32) / 255.0) * self.scale
 
                 if self.nchannels == 1:
                     img = img[:, :, None]
                 if self.swap_rgb and self.nchannels == 3:
                     img = img[:, :, [2, 1, 0]]
-                x[i, j, :, :, :] = img[x_start:x_start+self.crop_size[0],
-                                       y_start:y_start+self.crop_size[1], :]
+                x[i, j, :, :, :] = img[:, :, :]
 
                 ### Flip
                 if self.flip == 'flip' or (self.flip == 'random'
