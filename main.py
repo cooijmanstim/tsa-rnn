@@ -41,8 +41,8 @@ def construct_monitors(algorithm, task, model, graphs, outputs,
         data_independent_channels = []
         for parameter in graphs["train"].parameters:
             if parameter.name in "gamma beta W b".split():
-                quantity = parameter.mean()
-                quantity.name = "parameter:%s.mean" % util.get_path(parameter)
+                quantity = parameter.norm(2)
+                quantity.name = "parameter.norm:%s" % util.get_path(parameter)
                 data_independent_channels.append(quantity)
         for key in "location_std scale_std".split():
             data_independent_channels.append(hyperparameters[key].copy(name="parameter:%s" % key))
