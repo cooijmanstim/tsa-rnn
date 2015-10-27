@@ -26,7 +26,7 @@ class Canonicalize(transformers.Transformer):
     def transform_batch(self, batch):
         return self.mapping(batch)
 
-def _preprocess(self, data):
+def _canonicalize(self, data):
     return data
 
 def _center(self, data):
@@ -39,7 +39,7 @@ def _center(self, data):
     return x_centered, x_shape, y
 
 class Classification(object):
-    preprocess = _preprocess
+    canonicalize = _canonicalize
     center = _center
 
     @util.checkargs
@@ -68,7 +68,7 @@ class Classification(object):
         scheme = self.get_scheme(which_set, shuffle=shuffle, monitor=monitor, num_examples=num_examples)
         stream = DataStream.default_stream(dataset=self.datasets[which_set], iteration_scheme=scheme)
         stream = self.apply_default_transformers(stream, monitor=monitor)
-        stream = Canonicalize(stream, mapping=util.rebind(self.preprocess))
+        stream = Canonicalize(stream, mapping=util.rebind(self.canonicalize))
         if center:
             stream = transformers.Mapping(stream, mapping=util.rebind(self.center))
         return stream

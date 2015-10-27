@@ -6,7 +6,7 @@ import datasets
 
 logger = logging.getLogger(__name__)
 
-def _preprocess(self, data):
+def _canonicalize(self, data):
     x, y = data
     x = np.asarray(x)
     # move channel axis to just after batch axis
@@ -21,7 +21,7 @@ def _center(self, data):
 
 class Task(tasks.Classification):
     name = "ucf101"
-    preprocess = _preprocess
+    canonicalize = _canonicalize
     center = _center
 
     def __init__(self, *args, **kwargs):

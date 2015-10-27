@@ -96,7 +96,7 @@ class Emitter(object):
             graph.DropoutTransform("classifier_dropout", rng=rng),
             reason="regularization")
 
-def _preprocess(self, data):
+def _canonicalize(self, data):
     x, y = data
 
     x = np.float32(x) / 255.0
@@ -129,7 +129,7 @@ def _preprocess(self, data):
 
 class NumberTask(tasks.Classification):
     name = "svhn_number"
-    preprocess = _preprocess
+    canonicalize = _canonicalize
 
     def __init__(self, *args, **kwargs):
         super(NumberTask, self).__init__(*args, **kwargs)

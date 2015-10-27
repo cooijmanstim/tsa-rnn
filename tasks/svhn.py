@@ -1,7 +1,7 @@
 import numpy as np
 import tasks
 
-def _preprocess(self, data):
+def _canonicalize(self, data):
     x, y = data
     # remove bogus singleton dimension
     y = y.flatten()
@@ -13,7 +13,7 @@ def _preprocess(self, data):
 
 class DigitTask(tasks.Classification):
     name = "svhn_digit"
-    preprocess = _preprocess
+    canonicalize = _canonicalize
 
     def __init__(self, *args, **kwargs):
         super(DigitTask, self).__init__(*args, **kwargs)

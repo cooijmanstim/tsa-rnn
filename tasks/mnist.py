@@ -1,7 +1,7 @@
 import numpy as np
 import tasks
 
-def _preprocess(self, data):
+def _canonicalize(self, data):
     x, y = data
     # remove bogus singleton dimension
     y = y.flatten()
@@ -12,7 +12,7 @@ def _preprocess(self, data):
 
 class Task(tasks.Classification):
     name = "mnist"
-    preprocess = _preprocess
+    canonicalize = _canonicalize
 
     def __init__(self, *args, **kwargs):
         super(Task, self).__init__(*args, **kwargs)

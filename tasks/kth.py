@@ -20,7 +20,7 @@ def augment((videos, targets)):
               for video, offset in zip(videos, offsets)]
     return videos, targets
 
-def _preprocess(self, data):
+def _canonicalize(self, data):
     x, x_shape, y = data
     # introduce channel axis
     x = x[:, np.newaxis, ...]
@@ -30,7 +30,7 @@ def _preprocess(self, data):
 
 class Task(tasks.Classification):
     name = "kth"
-    preprocess = _preprocess
+    canonicalize = _canonicalize
 
     def __init__(self, *args, **kwargs):
         super(Task, self).__init__(*args, **kwargs)
