@@ -44,10 +44,10 @@ class Task(tasks.Classification):
                 which_set=which_set))
             for which_set in "train valid test".split())
 
-    def apply_default_transformers(self, stream):
-        # FIXME: don't augment on valid/test
-        stream = fuel.transformers.Mapping(
-            stream, mapping=augment)
+    def apply_default_transformers(self, stream, monitor):
+        if not monitor:
+            stream = fuel.transformers.Mapping(
+                stream, mapping=augment)
         stream = transformers.PaddingShape(
             stream, shape_sources=["videos"])
         return stream
