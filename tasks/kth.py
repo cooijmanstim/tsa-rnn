@@ -28,9 +28,13 @@ def _canonicalize(self, data):
             x_shape.astype(np.float32),
             y.astype(np.uint8))
 
+def _center(self, data):
+    return data
+
 class Task(tasks.Classification):
     name = "kth"
     canonicalize = _canonicalize
+    center = _center
 
     def __init__(self, *args, **kwargs):
         super(Task, self).__init__(*args, **kwargs)
@@ -56,9 +60,6 @@ class Task(tasks.Classification):
         if monitor and which_set == "train":
             return 300
         return super(Task, self).get_stream_num_examples(which_set, monitor)
-
-    def center(self, data):
-        return data
 
     def compute_batch_mean(self, x, x_shape):
         # average over time first
