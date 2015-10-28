@@ -214,6 +214,7 @@ class BatchNormalization(bricks.Initializable, bricks.Feedforward):
             # make the batch statistics identifiable to get_updates() below
             add_role(self.batch_stats[stat], self.roles[stat])
             self.batch_stats[stat].tag.batch_normalization_brick = self
+            self.population_stats[stat].tag.batch_normalization_brick = self
 
         gamma = T.patternbroadcast(self.gamma, [True] + self.broadcastable)
         beta = T.patternbroadcast(self.beta, [True] + self.broadcastable)

@@ -1,5 +1,6 @@
 name: "attention_rnn"
 task_name: "svhn_digit"
+monitor_options: steps parameters batch_normalization theta activations
 patchmonitor_interval: 100
 shrink_dataset_by: 1
 patience_epochs: 100

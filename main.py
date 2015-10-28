@@ -24,20 +24,20 @@ def construct_model(patch_shape, hidden_dim, hyperparameters, **kwargs):
 
 @util.checkargs
 def construct_monitors(algorithm, task, model, graphs, outputs,
-                       n_spatial_dims, plot_url, hyperparameters,
+                       updates, monitor_options, n_spatial_dims,
+                       plot_url, hyperparameters,
                        patchmonitor_interval, **kwargs):
     from blocks.extensions.monitoring import TrainingDataMonitoring, DataStreamMonitoring
-    from patchmonitor import PatchMonitoring, VideoPatchMonitoring
 
     extensions = []
 
-    if True:
+    if "steps" in monitor_options:
         extensions.append(TrainingDataMonitoring(
             [algorithm.steps[param].norm(2).copy(name="step_norm:%s" % name)
              for name, param in model.get_parameter_dict().items()],
             prefix="train", after_epoch=True))
 
-    if True:
+    if "parameters" in monitor_options:
         data_independent_channels = []
         for parameter in graphs["train"].parameters:
             if parameter.name in "gamma beta W b".split():
@@ -57,12 +57,14 @@ def construct_monitors(algorithm, task, model, graphs, outputs,
                         task.monitor_outputs())
         channels.append(outputs[which_set]["savings"]
                         .mean().copy(name="mean_savings"))
-        for key in "raw_location raw_scale".split():
-            for stat in "mean var".split():
-                channels.append(getattr(outputs[which_set][key], stat)(axis=1)
-                                .copy(name="%s.%s" % (key, stat)))
+
+        if "theta" in monitor_options:
+            for key in "raw_location raw_scale".split():
+                for stat in "mean var".split():
+                    channels.append(getattr(outputs[which_set][key], stat)(axis=1)
+                                    .copy(name="%s.%s" % (key, stat)))
         if which_set == "train":
-            if True:
+            if "activations" in monitor_options:
                 from blocks.roles import has_roles, OUTPUT
                 cnn_outputs = OrderedDict()
                 for var in theano.gof.graph.ancestors(graphs[which_set].outputs):
@@ -76,32 +78,48 @@ def construct_monitors(algorithm, task, model, graphs, outputs,
                             name="activation[%i].mean:%s" % (i, path)))
 
             channels.append(algorithm.total_gradient_norm.copy(name="total_gradient_norm"))
+
+        if "batch_normalization" in monitor_options:
+            errors = []
+            for population_stat, update in updates[which_set]:
+                if population_stat.name.startswith("population"):
+                    # this is a super robust way to get the
+                    # corresponding batch statistic from the
+                    # exponential moving average expression
+                    batch_stat = update.owner.inputs[1].owner.inputs[1]
+                    errors.append(((population_stat - batch_stat)**2).mean())
+            if errors:
+                channels.append(T.stack(errors).mean().copy(name="population_statistic_mse"))
+
         extensions.append(DataStreamMonitoring(
             channels, prefix=which_set, after_epoch=True,
             data_stream=task.get_stream(which_set, monitor=True)))
 
-    patchmonitor = None
-    if n_spatial_dims == 2:
-        patchmonitor_klass = PatchMonitoring
-    elif n_spatial_dims == 3:
-        patchmonitor_klass = VideoPatchMonitoring
+    if "patches" in monitor_options:
+        from patchmonitor import PatchMonitoring, VideoPatchMonitoring
 
-    if patchmonitor_klass:
-        for which in "train valid".split():
-            patch = outputs[which]["patch"]
-            patch = patch.dimshuffle(1, 0, *range(2, patch.ndim))
-            patch_extractor = theano.function(
-                [outputs[which][key] for key in "x x_shape".split()],
-                [outputs[which][key] for key in "raw_location raw_scale".split()] + [patch])
+        patchmonitor = None
+        if n_spatial_dims == 2:
+            patchmonitor_klass = PatchMonitoring
+        elif n_spatial_dims == 3:
+            patchmonitor_klass = VideoPatchMonitoring
 
-            patchmonitor = patchmonitor_klass(
-                save_to="%s_patches_%s" % (hyperparameters["name"], which),
-                data_stream=task.get_stream(which, shuffle=False, num_examples=10),
-                every_n_batches=patchmonitor_interval,
-                extractor=patch_extractor,
-                map_to_input_space=attention.static_map_to_input_space)
-            patchmonitor.save_patches("patchmonitor_test.png")
-            extensions.append(patchmonitor)
+        if patchmonitor_klass:
+            for which in "train valid".split():
+                patch = outputs[which]["patch"]
+                patch = patch.dimshuffle(1, 0, *range(2, patch.ndim))
+                patch_extractor = theano.function(
+                    [outputs[which][key] for key in "x x_shape".split()],
+                    [outputs[which][key] for key in "raw_location raw_scale".split()] + [patch])
+
+                patchmonitor = patchmonitor_klass(
+                    save_to="%s_patches_%s" % (hyperparameters["name"], which),
+                    data_stream=task.get_stream(which, shuffle=False, num_examples=10),
+                    every_n_batches=patchmonitor_interval,
+                    extractor=patch_extractor,
+                    map_to_input_space=attention.static_map_to_input_space)
+                patchmonitor.save_patches("patchmonitor_test.png")
+                extensions.append(patchmonitor)
 
     if plot_url:
         plot_channels = []
@@ -244,7 +262,7 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
 
     extensions.extend(construct_monitors(
         algorithm=algorithm, task=task, model=model, graphs=graphs,
-        outputs=outputs, **hyperparameters))
+        outputs=outputs, updates=updates, **hyperparameters))
 
     from blocks.extensions import FinishAfter, Printing, ProgressBar, Timing
     from blocks.extensions.stopping import FinishIfNoImprovementAfter
