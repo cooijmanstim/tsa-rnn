@@ -200,6 +200,12 @@ def get_convolution_classes():
     return (conv2d.Convolutional,
             conv3d.Convolutional)
 
+def get_conv_activation(brick, conv):
+    # blocks.bricks.conv is a ghetto
+    if isinstance(brick, conv.ConvolutionalLayer):
+        brick = brick.convolution
+    return brick.application_methods[-1].brick
+
 # make instance methods picklable -_-
 def rebind(f):
     from functools import partial

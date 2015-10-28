@@ -1,39 +1,36 @@
 import logging, collections
-import bricks, initialization
+import util, bricks, initialization
 import blocks.bricks.conv as conv2d
 import conv3d
 
 logger = logging.getLogger(__name__)
 
 def construct_cnn_layer(name, layer_spec, conv_module, ndim, batch_normalize):
-    type_ = layer_spec.pop("type", "conv")
-    if type_ == "pool":
-        layer = conv_module.MaxPooling(
-            name=name,
-            pooling_size=layer_spec.pop("size", (1,) * ndim),
-            step=layer_spec.pop("step", (1,) * ndim))
-    elif type_ == "conv":
-        border_mode = layer_spec.pop("border_mode", (0,) * ndim)
-        if not isinstance(border_mode, basestring):
-            # conv bricks barf on list-type shape arguments :/
-            border_mode = tuple(border_mode)
-        activation = bricks.NormalizedActivation(
-            name="activation",
-            batch_normalize=batch_normalize)
-        layer = conv_module.ConvolutionalActivation(
-            name=name,
-            activation=activation.apply,
-            filter_size=tuple(layer_spec.pop("size", (1,) * ndim)),
-            step=tuple(layer_spec.pop("step", (1,) * ndim)),
-            num_filters=layer_spec.pop("num_filters", 1),
-            border_mode=border_mode,
-            # our activation function will handle the bias
-            use_bias=False)
-        # sigh. really REALLY do not use biases
-        layer.convolution.use_bias = False
-        layer.convolution.weights_init = initialization.ConvolutionalInitialization(
-            initialization.Orthogonal())
-        layer.convolution.biases_init = initialization.Constant(0)
+    if "type" in layer_spec:
+        raise ValueError("conv layer spec error: `pool` is part of `conv` now"
+                         " (keys `pooling_size`, `pooling_step`) and `type` is"
+                         " no longer needed")
+    border_mode = layer_spec.pop("border_mode", "valid")
+    activation = bricks.NormalizedActivation(
+        name="activation",
+        batch_normalize=batch_normalize)
+    klass = conv_module.ConvolutionalActivation
+    kwargs = dict(
+        name=name,
+        activation=activation.apply,
+        filter_size=tuple(layer_spec.pop("size", (1,) * ndim)),
+        step=tuple(layer_spec.pop("step", (1,) * ndim)),
+        num_filters=layer_spec.pop("num_filters", 1),
+        border_mode=border_mode,
+        # our activation function will handle the bias
+        use_bias=False)
+    if "pooling_size" in layer_spec or "pooling_step" in layer_spec:
+        klass = conv_module.ConvolutionalLayer
+        kwargs["pooling_size"] = layer_spec.pop("pooling_size", None)
+        kwargs["pooling_step"] = layer_spec.pop("pooling_step", None)
+        # zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz
+        kwargs["conv_step"] = kwargs.pop("step")
+    layer = klass(**kwargs)
     if layer_spec:
         logger.warn("ignoring unknown layer specification keys [%s]"
                     % " ".join(layer_spec.keys()))
@@ -47,27 +44,26 @@ def construct_cnn(name, layer_specs, n_channels, input_shape, batch_normalize):
     }[ndim]
     cnn = conv_module.ConvolutionalSequence(
         name=name,
-        layers=[construct_cnn_layer("patch_conv_%i" % i,
-                                    layer_spec, ndim=ndim,
+        layers=[construct_cnn_layer(name="%s_%i" % (name, i),
+                                    layer_spec=layer_spec,
+                                    ndim=ndim,
                                     conv_module=conv_module,
                                     batch_normalize=batch_normalize)
                 for i, layer_spec in enumerate(layer_specs)],
         num_channels=n_channels,
         image_size=tuple(input_shape),
+        weights_init=initialization.ConvolutionalInitialization(
+            initialization.Orthogonal()),
         # our activation function will handle the bias
         use_bias=False)
     # ensure output dim is determined
     cnn.push_allocation_config()
     # tell the activations what shapes they'll be dealing with
     for layer in cnn.layers:
-        # woe is me
-        try:
-            activation = layer.application_methods[-1].brick
-        except:
-            continue
-        if isinstance(activation, bricks.NormalizedActivation):
-            activation.shape = layer.get_dim("output")
-            activation.broadcastable = [False] + len(input_shape)*[True]
+        activation = util.get_conv_activation(layer, conv_module)
+        assert isinstance(activation, bricks.NormalizedActivation)
+        activation.shape = layer.get_dim("output")
+        activation.broadcastable = [False] + len(input_shape)*[True]
     cnn.initialize()
     return cnn
 
