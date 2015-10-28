@@ -184,6 +184,9 @@ class Scope(object):
     def __iter__(self):
         return iter(self._dikt)
 
+    def keys(self):
+        return self._dikt.keys()
+
 def the(xs):
     assert len(xs) == 1
     return xs[0]

@@ -27,10 +27,28 @@ class SingleSoftmax(object):
             child.initialize()
 
     def emit(self, x, y):
-        energy = self.mlp.apply(x)
+        return self.emit_costs(targets=y, **self.emit_distribution(x))
+
+    def emit_distribution(self, x):
+        scope = util.Scope()
+        scope.energies = self.mlp.apply(x)
+        scope.log_probabilities = self.softmax.log_probabilities(scope.energies)
+        scope.probabilities = T.exp(scope.log_probabilities)
+        return scope
+
+    def emit_costs(self, targets, energies=None,
+                   log_probabilities=None, probabilities=None,
+                   **kwargs):
+        if not energies:
+            if probabilities and not log_probabilities:
+                log_probabilities = T.log(probabilities)
+            if log_probabilities:
+                energies = log_probabilities
+            assert energies
+
         cross_entropy = self.softmax.categorical_cross_entropy(
-            y.flatten(), energy).mean(axis=0)
-        error_rate = T.neq(y, energy.argmax(axis=1)).mean(axis=0)
+            targets.flatten(), energies).mean(axis=0)
+        error_rate = T.neq(targets, energies.argmax(axis=1)).mean(axis=0)
         return util.Scope(
             cost=cross_entropy.copy(name="cost"),
             cross_entropy=cross_entropy.copy(name="cross_entropy"),
