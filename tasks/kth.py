@@ -57,6 +57,9 @@ class Task(tasks.Classification):
             return 300
         return super(Task, self).get_stream_num_examples(which_set, monitor)
 
+    def center(self, data):
+        return data
+
     def compute_batch_mean(self, x, x_shape):
         # average over time first
         time = 2
