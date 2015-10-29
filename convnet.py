@@ -24,19 +24,19 @@ def construct_model(convnet_spec, n_channels, video_shape,
 
 @util.checkargs
 def construct_monitors(algorithm, task, model, graphs, outputs,
+                       updates, monitor_options, n_spatial_dims,
                        plot_url, hyperparameters, **kwargs):
     from blocks.extensions.monitoring import TrainingDataMonitoring, DataStreamMonitoring
-    from patchmonitor import PatchMonitoring, VideoPatchMonitoring
 
     extensions = []
 
-    if True:
+    if "steps" in monitor_options:
         extensions.append(TrainingDataMonitoring(
             [algorithm.steps[param].norm(2).copy(name="step_norm:%s" % name)
              for name, param in model.get_parameter_dict().items()],
             prefix="train", after_epoch=True))
 
-    if True:
+    if "parameters" in monitor_options:
         data_independent_channels = []
         for parameter in graphs["train"].parameters:
             if parameter.name in "gamma beta W b".split():
@@ -53,7 +53,7 @@ def construct_monitors(algorithm, task, model, graphs, outputs,
         channels.extend(outputs[which_set][key] for key in
                         task.monitor_outputs())
         if which_set == "train":
-            if True:
+            if "activations" in monitor_options:
                 from blocks.roles import has_roles, OUTPUT
                 cnn_outputs = OrderedDict()
                 for var in theano.gof.graph.ancestors(graphs[which_set].outputs):
@@ -67,6 +67,19 @@ def construct_monitors(algorithm, task, model, graphs, outputs,
                             name="activation[%i].mean:%s" % (i, path)))
 
             channels.append(algorithm.total_gradient_norm.copy(name="total_gradient_norm"))
+
+        if "batch_normalization" in monitor_options:
+            errors = []
+            for population_stat, update in updates[which_set]:
+                if population_stat.name.startswith("population"):
+                    # this is a super robust way to get the
+                    # corresponding batch statistic from the
+                    # exponential moving average expression
+                    batch_stat = update.owner.inputs[1].owner.inputs[1]
+                    errors.append(((population_stat - batch_stat)**2).mean())
+            if errors:
+                channels.append(T.stack(errors).mean().copy(name="population_statistic_mse"))
+
         extensions.append(DataStreamMonitoring(
             channels, prefix=which_set, after_epoch=True,
             data_stream=task.get_stream(which_set, monitor=True)))
@@ -199,15 +212,14 @@ def construct_main_loop(name, task_name, batch_size, max_epochs,
     algorithm = GradientDescent(
         cost=outputs["train"]["cost"],
         parameters=graphs["train"].parameters,
-        step_rule=CompositeRule([StepClipping(1e1),
-                                 Adam(learning_rate=learning_rate),
-                                 StepClipping(1e2)]),
+        step_rule=CompositeRule([Adam(learning_rate=learning_rate),
+                                 StepClipping(1e3)]),
         on_unused_sources="warn")
     algorithm.add_updates(updates["train"])
 
     extensions.extend(construct_monitors(
         algorithm=algorithm, task=task, model=model, graphs=graphs,
-        outputs=outputs, **hyperparameters))
+        outputs=outputs, updates=updates, **hyperparameters))
 
     from blocks.extensions import FinishAfter, Printing, ProgressBar, Timing
     from blocks.extensions.stopping import FinishIfNoImprovementAfter
@@ -253,7 +265,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--hyperparameters", help="YAML file from which to load hyperparameters")
-    parser.add_argument("--checkpoint", help="LightCheckpoint zipfile from which to resume training")
+    parser.add_argument("--checkpoint", help="Checkpoint file from which to resume training")
     parser.add_argument("--autoresume", action="store_true", help="Resume from default checkpoint path or start training if it does not exist")
 
     args = parser.parse_args()
