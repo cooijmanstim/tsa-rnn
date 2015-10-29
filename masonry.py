@@ -63,7 +63,7 @@ def construct_cnn(name, layer_specs, n_channels, input_shape, batch_normalize):
         activation = util.get_conv_activation(layer, conv_module)
         assert isinstance(activation, bricks.NormalizedActivation)
         activation.shape = layer.get_dim("output")
-        activation.broadcastable = [False] + len(input_shape)*[True]
+        activation.broadcastable = [False] + ndim*[True]
     cnn.initialize()
     return cnn
 

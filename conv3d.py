@@ -215,9 +215,9 @@ class MaxPooling(Initializable, Feedforward):
         if name == 'input_':
             return self.input_dim
         if name == 'output':
-            out_shape = ((self.num_channels,) +
+            out_shape = ((self.input_dim[0],) +
                          tuple((a - b)//c + 1 for a, b, c in
-                               zip(self.input_dim, self.pooling_size, self.step)))
+                               zip(self.input_dim[1:], self.pooling_size, self.step)))
             return out_shape
 
 
