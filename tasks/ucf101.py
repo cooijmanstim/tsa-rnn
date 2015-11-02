@@ -59,7 +59,7 @@ class Task(tasks.Classification):
             data_stream=stream)
 
     def get_stream_num_examples(self, which_set, monitor):
-        if monitor and which_set == "train":
+        if monitor and (which_set == "train" or which_set == "valid"):
             return 1000
         else:
             return self.datasets[which_set].num_video_examples

@@ -1,5 +1,5 @@
 import math
-
+import numpy as np
 import theano
 import theano.tensor as T
 
@@ -17,6 +17,8 @@ class LocallySoftRectangularCropper(Brick):
         self.cutoff = hyperparameters["cutoff"]
         self.batched_window = hyperparameters["batched_window"]
         self.n_spatial_dims = len(patch_shape)
+        self.batch_size = hyperparameters["batch_size"]
+        self.batch_size_constant = hyperparameters["batch_size_constant"]
 
     def compute_crop_matrices(self, locations, scales, Is):
         Ws = []
@@ -74,7 +76,7 @@ class LocallySoftRectangularCropper(Brick):
         if self.batched_window:
             patch = self.apply_inner(image, location, scale, a[0], b[0])
         else:
-            def map_fn(image, image_shape, a, b, location, scale):
+            def map_fn(image, a, b, location, scale):
                 # apply_inner expects a batch axis
                 image = T.shape_padleft(image)
                 location = T.shape_padleft(location)
@@ -85,8 +87,15 @@ class LocallySoftRectangularCropper(Brick):
                 # return without batch axis
                 return patch[0]
 
-            patch, _ = theano.map(map_fn,
-                                  sequences=[image, a, b, location, scale])
+            if self.batch_size_constant:
+                # avoid scan by constant batch size
+                patch = T.stack([
+                    map_fn(image[i], a[i], b[i], location[i], scale[i])
+                    for i in xrange(self.batch_size)])
+            else:
+                patch, _ = theano.map(
+                    map_fn,
+                    sequences=[image, a, b, location, scale])
 
         savings = (1 - T.cast((b - a).prod(axis=1), floatX) / image_shape.prod(axis=1))
         return patch, savings

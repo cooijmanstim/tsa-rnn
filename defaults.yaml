@@ -6,6 +6,7 @@ shrink_dataset_by: 1
 patience_epochs: 100
 max_epochs: 500
 batch_size: 100
+batch_size_constant: True
 hidden_dim: 256
 n_patches: 8
 patch_shape: [8, 8]

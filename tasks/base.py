@@ -43,9 +43,10 @@ class Classification(object):
     center = _center
 
     @util.checkargs
-    def __init__(self, batch_size, shrink_dataset_by=1, **kwargs):
+    def __init__(self, batch_size, batch_size_constant, shrink_dataset_by=1, **kwargs):
         self.shrink_dataset_by = shrink_dataset_by
         self.batch_size = batch_size
+        self.batch_size_constant = batch_size_constant
         self.datasets = self.load_datasets()
 
     def load_datasets(self):
@@ -65,6 +66,9 @@ class Classification(object):
     def get_stream(self, which_set, shuffle=True, monitor=False, num_examples=None, center=True):
         if num_examples is None:
             num_examples = self.get_stream_num_examples(which_set, monitor=monitor)
+        if self.batch_size_constant:
+            # enforce constant batch size by dropping the last partial batch
+            num_examples -= num_examples % self.batch_size
         scheme = self.get_scheme(which_set, shuffle=shuffle, monitor=monitor, num_examples=num_examples)
         stream = DataStream.default_stream(dataset=self.datasets[which_set], iteration_scheme=scheme)
         stream = self.apply_default_transformers(stream, monitor=monitor)
