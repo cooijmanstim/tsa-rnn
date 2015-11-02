@@ -274,7 +274,8 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
         DumpBest("best_valid_error_rate", name+"_best.zip"),
         Checkpoint(hyperparameters["checkpoint_save_path"],
                    on_interrupt=False, every_n_epochs=5,
-                   before_training=True, use_cpickle=True),
+                   before_training=True, use_cpickle=True,
+                   save_separately=["log"]),
         ProgressBar(), Timing(), Printing(), PrintingTo(name+"_log")])
 
     from blocks.main_loop import MainLoop
