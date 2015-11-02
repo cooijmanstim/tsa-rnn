@@ -255,8 +255,7 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
     algorithm = GradientDescent(
         cost=outputs["train"]["cost"],
         parameters=graphs["train"].parameters,
-        step_rule=CompositeRule([Adam(learning_rate=learning_rate),
-                                 StepClipping(1e3)]))
+        step_rule=CompositeRule([StepClipping(1e2), Adam(learning_rate=learning_rate)]))
     algorithm.add_updates(updates["train"])
 
     extensions.extend(construct_monitors(
