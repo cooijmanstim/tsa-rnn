@@ -101,26 +101,29 @@ class Classification(object):
                 for name in "cross_entropy error_rate".split()]
 
     def get_mean(self):
-        cache_dir = os.environ["PREPROCESS_CACHE"]
         try:
-            os.mkdir(cache_dir)
-        except OSError:
-            # directory already exists. surely the end of the world.
-            pass
-        cache = os.path.join(cache_dir, "%s.npz" % self.name)
-        try:
-            data = np.load(cache)
-            mean = data["mean"]
-        except IOError:
-            print "taking mean"
-            mean = self.compute_mean()
-            print "mean taken"
+            return self._mean
+        except AttributeError:
+            cache_dir = os.environ["PREPROCESS_CACHE"]
             try:
-                np.savez(cache, mean=mean)
-            except IOError, e:
-                logger.error("couldn't save preprocessing cache: %s" % e)
-                import ipdb; ipdb.set_trace()
-        return mean
+                os.mkdir(cache_dir)
+            except OSError:
+                # directory already exists. surely the end of the world.
+                pass
+            cache = os.path.join(cache_dir, "%s.npz" % self.name)
+            try:
+                data = np.load(cache)
+                self._mean = data["mean"]
+            except IOError:
+                print "taking mean"
+                self._mean = self.compute_mean()
+                print "mean taken"
+                try:
+                    np.savez(cache, mean=self._mean)
+                except IOError, e:
+                    logger.error("couldn't save preprocessing cache: %s" % e)
+                    import ipdb; ipdb.set_trace()
+        return self._mean
 
     def compute_mean(self):
         mean = 0
