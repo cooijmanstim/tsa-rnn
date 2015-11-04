@@ -680,7 +680,7 @@ class JpegHDF5Dataset(H5PYDataset):
         data_file = h5py.File(data_path, 'r')
 
         self.video_indexes = np.array(data_file["video_indexes"][split])
-        self.num_video_examples = len(self.video_indexes)
+        self.num_video_examples = len(self.video_indexes) - 1
 
         super(JpegHDF5Dataset, self).__init__(data_file, which_sets=(split,), load_in_memory=load_in_memory)
         data_file.close()
