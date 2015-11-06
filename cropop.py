@@ -223,7 +223,9 @@ class TimCropperOp(GpuOp):
             float div = (iv - nv/2);
             float xv = div / s + l;
             float delta = (xV - xv);
-            float sigma = prior_sigma / s;
+            // bound the influence of scale on sigma to avoid the kernels
+            // becoming too narrow when zooming in.
+            float sigma = prior_sigma / min(s, .9);
             float delta2 = delta * delta, sigma2 = sigma * sigma, s2 = s * s;
             float delta2_sigma2 = delta2 / sigma2;
             float g = exp(-0.5 * delta2_sigma2) / sqrt(2*M_PI) / sigma;
