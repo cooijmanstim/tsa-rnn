@@ -1,8 +1,29 @@
 import logging, numbers
-import theano.gof.graph
+import theano
 import util
 
 logger = logging.getLogger(__name__)
+
+def has_inner_graph(variable):
+    return (hasattr(variable, "owner") and
+            isinstance(variable.owner,
+                       tuple(theano.gof.ops_with_inner_function.keys())))
+
+# like theano.gof.graph.ancestors but descend into scan and the like
+def deep_ancestors(variables):
+    variables = theano.gof.graph.ancestors(variables)
+    for variable in list(variables):
+        try:
+            inner_outputs = variable.owner.outputs
+        except AttributeError:
+            pass
+        else:
+            if has_inner_graph(variable):
+                variables.extend(deep_ancestors(list(inner_outputs)))
+    return variables
+
+def graph_size(variable_list):
+    return len(set(deep_ancestors(variable_list)))
 
 def tag_with_id(variable):
     if not hasattr(variable.tag, "original_id"):
@@ -50,7 +71,7 @@ def add_transform(variables, transform, reason):
 def apply_transforms(variables, reason, hyperparameters):
     # tag all variables with their `id` so we can determine identity
     # in the aftermath of cloning.
-    tag_with_ids(theano.gof.graph.ancestors(variables))
+    tag_with_ids(deep_ancestors(variables))
     # want identical replacements for variables that were identical
     # before cloning madness.
     memory = dict()
@@ -63,7 +84,7 @@ def apply_transforms(variables, reason, hyperparameters):
                 newvar = memory[transform][var.tag.original_id]
             except KeyError:
                 newvar = transform(var, **hyperparameters)
-                tag_with_ids(theano.gof.graph.ancestors([newvar]))
+                tag_with_ids(deep_ancestors([newvar]))
                 memory.setdefault(
                     transform, dict())[var.tag.original_id] = newvar
             var = newvar

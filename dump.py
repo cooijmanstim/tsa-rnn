@@ -1,6 +1,7 @@
 import tempfile, os.path, cPickle, zipfile, shutil
-import numpy as np
 from collections import OrderedDict
+import numpy as np
+import theano
 from blocks.extensions import SimpleExtension, Printing
 from blocks.serialization import secure_dump
 import blocks.config
@@ -19,6 +20,21 @@ class PrintingTo(Printing):
         with open(self.path, "a") as f:
             f.write("\n".join(lines))
             f.write("\n")
+
+class DumpGraph(SimpleExtension):
+    def __init__(self, path, **kwargs):
+        kwargs["after_epoch"] = True
+        super(DumpGraph, self).__init__(**kwargs)
+        self.path = path
+
+    def do(self, which_callback, *args, **kwargs):
+        try:
+            self.done
+        except AttributeError:
+            if hasattr(self.main_loop.algorithm, "_function"):
+                self.done = True
+                with open(self.path, "w") as f:
+                    theano.printing.debugprint(self.main_loop.algorithm._function, file=f)
 
 class DumpBest(SimpleExtension):
     """dump if the `notification_name` record is present"""

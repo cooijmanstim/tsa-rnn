@@ -229,10 +229,10 @@ class BatchNormalization(bricks.Initializable, bricks.Feedforward):
         # graph so we get the ones that are *actually being used in
         # the computation* after graph transforms have been applied
         updates = []
-        variables = theano.gof.graph.ancestors(variables)
+        variables = graph.deep_ancestors(variables)
         for stat, role in BatchNormalization.roles.items():
-            from blocks.filter import VariableFilter
-            batch_stats = VariableFilter(roles=[role])(variables)
+            from blocks.roles import has_roles
+            batch_stats = [var for var in variables if has_roles(var, [role])]
             batch_stats = util.dedup(batch_stats, equal=util.equal_computations)
 
             batch_stats_by_brick = OrderedDict()

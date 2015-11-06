@@ -196,23 +196,23 @@ class RecurrentAttentionModel(object):
         scope.excursion = util.rectify(scope.raw_location**2 - 1)
 
     def tag_attention_dropout(self, variables, rng=None, **hyperparameters):
-        from blocks.roles import INPUT
-        from blocks.filter import VariableFilter
+        from blocks.roles import INPUT, has_roles
         bricks_ = [brick for brick in
                    util.all_bricks([self.patch_transform])
                    if isinstance(brick, (bricks.Linear,
                                          conv2d.Convolutional,
                                          conv3d.Convolutional))]
-        variables = (VariableFilter(roles=[INPUT], bricks=bricks_)
-                     (theano.gof.graph.ancestors(variables)))
+        variables = [var for var in graph.deep_ancestors(variables)
+                     if (has_roles(var, [INPUT]) and
+                         any(brick in var.tag.annotations for brick in bricks_))]
         graph.add_transform(
             variables,
             graph.DropoutTransform("attention_dropout", rng=rng),
             reason="regularization")
 
     def tag_recurrent_weight_noise(self, variables, rng=None, **hyperparameters):
-        variables = [var for var in theano.gof.graph.ancestors(variables)
-                     if getattr(var, "weight_noise_goes_here", False)]
+        variables = [var for var in graph.deep_ancestors(variables)
+                     if var.name == "weight_noise_goes_here"]
         graph.add_transform(
             variables,
             graph.WhiteNoiseTransform("recurrent_weight_noise", rng=rng),
@@ -220,21 +220,19 @@ class RecurrentAttentionModel(object):
 
     def tag_recurrent_dropout(self, variables, recurrent_dropout,
                               rng=None, **hyperparameters):
-        from blocks.roles import OUTPUT
-        from blocks.filter import VariableFilter
+        from blocks.roles import OUTPUT, has_roles
+        ancestors = graph.deep_ancestors(variables)
         for lstm in self.rnn.transitions:
-            variables = (VariableFilter(roles=[OUTPUT], bricks=[lstm])
-                         (theano.gof.graph.ancestors(variables)))
-            variables = [var for var in variables
-                         if var.name.endswith("states")]
+            variables = [var for var in ancestors
+                         if (has_roles(var, [OUTPUT]) and
+                             lstm in var.tag.annotations and
+                             var.name.endswith("states"))]
 
             # get one dropout mask for all time steps.  use the very
             # first state to get the hidden state shape, else we get
             # graph cycles.
-            initial_state = [var for var in variables
-                             if "initial_state" in var.name]
-            assert(len(initial_state) == 1)
-            initial_state = initial_state[0]
+            initial_state = util.the([var for var in variables
+                                      if "initial_state" in var.name])
             mask = util.get_dropout_mask(
                 initial_state.shape, recurrent_dropout, rng=rng)
 

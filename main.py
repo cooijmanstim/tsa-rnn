@@ -32,10 +32,14 @@ def construct_monitors(algorithm, task, model, graphs, outputs,
     extensions = []
 
     if "steps" in monitor_options:
+        step_channels = []
+        step_channels.extend([
+            algorithm.steps[param].norm(2).copy(name="step_norm:%s" % name)
+            for name, param in model.get_parameter_dict().items()])
+        step_channels.append(algorithm.total_gradient_norm.copy(name="total_gradient_norm"))
+        logger.warning("constructing training data monitor")
         extensions.append(TrainingDataMonitoring(
-            [algorithm.steps[param].norm(2).copy(name="step_norm:%s" % name)
-             for name, param in model.get_parameter_dict().items()],
-            prefix="train", after_epoch=True))
+            step_channels, prefix="train", after_epoch=True))
 
     if "parameters" in monitor_options:
         data_independent_channels = []
@@ -91,6 +95,7 @@ def construct_monitors(algorithm, task, model, graphs, outputs,
             if errors:
                 channels.append(T.stack(errors).mean().copy(name="population_statistic_mse"))
 
+        logger.warning("constructing %s monitor" % which_set)
         extensions.append(DataStreamMonitoring(
             channels, prefix=which_set, after_epoch=True,
             data_stream=task.get_stream(which_set, monitor=True)))
@@ -141,21 +146,21 @@ def prepare_mode(mode, outputs, ram, emitter, hyperparameters, **kwargs):
         ram.tag_attention_dropout(outputs, **hyperparameters)
         ram.tag_recurrent_weight_noise(outputs, **hyperparameters)
         ram.tag_recurrent_dropout(outputs, **hyperparameters)
-        logger.warning("%i variables in %s graph" % (util.graph_size(outputs), mode))
+        logger.warning("%i variables in %s graph" % (graph.graph_size(outputs), mode))
         outputs = graph.apply_transforms(outputs, reason="regularization",
                                          hyperparameters=hyperparameters)
-        logger.warning("%i variables in %s graph" % (util.graph_size(outputs), mode))
+        logger.warning("%i variables in %s graph" % (graph.graph_size(outputs), mode))
 
         updates = bricks.BatchNormalization.get_updates(outputs)
         print "batch normalization updates:", updates
 
         return outputs, updates
     elif mode == "inference":
-        logger.warning("%i variables in %s graph" % (util.graph_size(outputs), mode))
+        logger.warning("%i variables in %s graph" % (graph.graph_size(outputs), mode))
         outputs = graph.apply_transforms(
             outputs, reason="population_normalization",
             hyperparameters=hyperparameters)
-        logger.warning("%i variables in %s graph" % (util.graph_size(outputs), mode))
+        logger.warning("%i variables in %s graph" % (graph.graph_size(outputs), mode))
         return outputs, []
 
 @util.checkargs
@@ -266,7 +271,7 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
     from blocks.extensions.stopping import FinishIfNoImprovementAfter
     from blocks.extensions.training import TrackTheBest
     from blocks.extensions.saveload import Checkpoint
-    from dump import DumpBest, LightCheckpoint, PrintingTo
+    from dump import DumpBest, LightCheckpoint, PrintingTo, DumpGraph
     extensions.extend([
         TrackTheBest("valid_error_rate", "best_valid_error_rate"),
         FinishIfNoImprovementAfter("best_valid_error_rate", epochs=patience_epochs),
@@ -276,21 +281,16 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
                    on_interrupt=False, every_n_epochs=5,
                    before_training=True, use_cpickle=True,
                    save_separately=["log"]),
-        ProgressBar(), Timing(), Printing(), PrintingTo(name+"_log")])
+        ProgressBar(),
+        Timing(),
+        Printing(), PrintingTo(name+"_log"),
+        DumpGraph(name+"_grad_graph")])
 
     from blocks.main_loop import MainLoop
     main_loop = MainLoop(data_stream=task.get_stream("train"),
                          algorithm=algorithm,
                          extensions=extensions,
                          model=model)
-
-    # note blocks will crash and burn because it cannot deal with an
-    # already-initialized Algorithm, so this should be enabled only for
-    # debugging
-    if False:
-        with open("graph", "w") as graphfile:
-            algorithm.initialize()
-            theano.printing.debugprint(algorithm._function, file=graphfile)
 
     from tabulate import tabulate
     print "parameter sizes:"

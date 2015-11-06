@@ -102,7 +102,7 @@ def checkargs(f):
             return f(*args, **kwargs)
         except TypeError as e:
             type, value, traceback = sys.exc_info()
-            if "takes exactly" in e.message:
+            if "takes" in e.message and "argument" in e.message:
                 import inspect
                 argspec = inspect.getargspec(f)
                 required_args = argspec.args
@@ -130,9 +130,6 @@ def all_bricks(bricks):
         bricks.append(brick)
         fringe.extend(brick.children)
     return bricks
-
-def graph_size(variable_list):
-    return len(set(theano.gof.graph.ancestors(variable_list)))
 
 def get_dropout_mask(shape, probability, **rng_args):
     rng = get_rng(**rng_args)
