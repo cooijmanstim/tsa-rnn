@@ -65,15 +65,22 @@ class TimCropperOp(GpuOp):
         return (0)
 
     def _grid_block_definition(self):
-        ndim_spatial = len(self.output_shape)
+        dims = self.output_shape
+        ndim_spatial = len(dims)
         if ndim_spatial == 2:
             return """
-            dim3 grid(ydims[0] * ydims[1]);
-            dim3 block(ydims[2], ydims[3]);"""
+            dim3 block(1, 32, 32);
+            dim3 grid(ydims[0] * ydims[1],
+                      (ydims[2] + block.y - 1) / block.y,
+                      (ydims[3] + block.z - 1) / block.z);
+            """
         elif ndim_spatial == 3:
             return """
-            dim3 grid(ydims[0] * ydims[1], ydims[2]);
-            dim3 block(ydims[3], ydims[4]);"""
+            dim3 block(1, 32, 32);
+            dim3 grid(ydims[0] * ydims[1],
+                      (ydims[2] + block.y - 1) / block.y,
+                      (ydims[3] * ydims[4] + block.z - 1) / block.z);
+            """
         else:
             raise NotImplementedError()
 
@@ -84,17 +91,18 @@ class TimCropperOp(GpuOp):
             // assuming C order
             int i0 = blockIdx.x / n1v,
                 i1 = blockIdx.x % n1v,
-                i2v = threadIdx.x,
-                i3v = threadIdx.y;
+                i2v = blockIdx.y * blockDim.y + threadIdx.y,
+                i3v = blockIdx.z * blockDim.z + threadIdx.z;
             """
         elif ndim_spatial == 3:
             return """
             // assuming C order
             int i0 = blockIdx.x / n1v,
                 i1 = blockIdx.x % n1v,
-                i2v = blockIdx.y,
-                i3v = threadIdx.x,
-                i4v = threadIdx.y;
+                i2v = blockIdx.y * blockDim.y + threadIdx.y;
+            int i34v = blockIdx.z * blockDim.z + threadIdx.z;
+            int i3v = i34v / n4v,
+                i4v = i34v % n4v;
             """
         else:
             raise NotImplementedError()
