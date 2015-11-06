@@ -29,9 +29,9 @@ class Task(tasks.Classification):
         super(Task, self).__init__(**kwargs)
 
     def load_datasets(self):
-        filename = "cmv%s_jpeg.hdf5" % "x".join(map(str, self.video_shape))
+        filename = "cmv%s_png.hdf5" % "x".join(map(str, self.video_shape))
         return dict(
-            (which_set, datasets.JpegVideoDataset(
+            (which_set, datasets.PngVideoDataset(
                 path=os.path.join(os.environ["CMV_DATADIR"], filename),
                 which_set=which_set))
             for which_set in "train valid test".split())

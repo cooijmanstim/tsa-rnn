@@ -4,10 +4,10 @@ from StringIO import StringIO
 from PIL import Image
 import fuel.datasets
 
-class JpegVideoDataset(fuel.datasets.H5PYDataset):
+class FramewiseCompressedVideoDataset(fuel.datasets.H5PYDataset):
     def __init__(self, path, which_set):
         file = h5py.File(path, "r")
-        super(JpegVideoDataset, self).__init__(
+        super(FramewiseCompressedVideoDataset, self).__init__(
             file, sources=tuple("videos targets".split()),
             which_sets=(which_set,), load_in_memory=True)
         # TODO: find a way to deal with `which_sets`, especially when
@@ -17,18 +17,24 @@ class JpegVideoDataset(fuel.datasets.H5PYDataset):
         file.close()
 
     def get_data(self, *args, **kwargs):
-        video_ranges, targets = super(JpegVideoDataset, self).get_data(*args, **kwargs)
-        videos = list(map(self.video_from_jpegs, video_ranges))
+        video_ranges, targets = super(FramewiseCompressedVideoDataset, self).get_data(*args, **kwargs)
+        videos = list(map(self.video_from_frames, video_ranges))
         return videos, targets
 
-    def video_from_jpegs(self, video_range):
+    def video_from_frames(self, video_range):
         frames = self.frames[video_range[0]:video_range[1]]
         video = np.array(map(self.load_frame, frames))
         return video
 
-    def load_frame(self, jpeg):
-        image = Image.open(StringIO(jpeg.tostring()))
+    def load_frame(self, bytes):
+        image = Image.open(StringIO(bytes.tostring()))
         image = (np.array(image.getdata(), dtype=np.float32)
                  .reshape((image.size[1], image.size[0])))
         image /= 255.0
         return image
+
+class JpegVideoDataset(FramewiseCompressedVideoDataset):
+    pass
+
+class PngVideoDataset(FramewiseCompressedVideoDataset):
+    pass
