@@ -10,23 +10,19 @@ from theano.sandbox.cuda.basic_ops import (as_cuda_ndarray_variable,
 from theano.tensor import as_tensor_variable
 
 class TimCropperOp(GpuOp):
-    def __init__(self, output_shape, grad=False):
+    def __init__(self, output_shape):
         # NOTE: output_shape specifies spatial dimensions only
         self.output_shape = tuple(output_shape)
-        self.grad = grad
 
     def __eq__(self, other):
         return (type(self) == type(other) and
-                self.grad == other.grad and
                 self.output_shape == other.output_shape)
 
     def __hash__(self):
-        return hash(type(self)) ^ hash(self.grad) ^ hash(self.output_shape)
+        return hash(type(self)) ^ hash(self.output_shape)
 
     def __str__(self):
-        return '%s{%s%s}' % (self.__class__.__name__,
-                             self.output_shape,
-                             ",grad" if self.grad else "")
+        return '%s{%s}' % (self.__class__.__name__, self.output_shape)
 
     def make_node(self, x, a, b, l, s):
         for input, ndim in ((x, 2 + len(self.output_shape)),
@@ -37,29 +33,11 @@ class TimCropperOp(GpuOp):
         # NOTE: can handle discontiguous x
         x, a, b, l, s = tuple(map(gpu_contiguous, (x, a, b, l, s)))
         inputs = list(map(as_cuda_ndarray_variable, (x, a, b, l, s)))
-        patch_type = inputs[0].type()
-        if self.grad:
-            # return derivatives wrt l, s. the rest is zero.
-            outputs = [patch_type, patch_type]
-        else:
-            outputs = [patch_type]
-        self.output_names = ("ddl dds" if self.grad else "y").split()
-        return Apply(self, inputs, outputs)
+        return Apply(self, inputs, [inputs[0].type()])
 
     # TODO
     # def perform(self, node, input_storage, output_storage):
         #raise NotImplementedError('only C is implemented')
-
-    def grad(self, inp, grads):
-        x, a, b, l, s = inp
-        y, = grads
-        ddl, dds = TimCropper(self.output_shape, grad=True)(*inp)
-        return [
-            T.zeros_like(x),
-            T.zeros_like(a),
-            T.zeros_like(b),
-            y * ddl,
-            y * dds]
 
     def c_code_cache_version(self):
         return (0)
@@ -89,16 +67,16 @@ class TimCropperOp(GpuOp):
         if ndim_spatial == 2:
             return """
             // assuming C order
-            int i0 = blockIdx.x / n1v,
-                i1 = blockIdx.x % n1v,
+            int i0 = blockIdx.x / x_dims[1],
+                i1 = blockIdx.x % x_dims[1],
                 i2v = blockIdx.y * blockDim.y + threadIdx.y,
                 i3v = blockIdx.z * blockDim.z + threadIdx.z;
             """
         elif ndim_spatial == 3:
             return """
             // assuming C order
-            int i0 = blockIdx.x / n1v,
-                i1 = blockIdx.x % n1v,
+            int i0 = blockIdx.x / x_dims[1],
+                i1 = blockIdx.x % x_dims[1],
                 i2v = blockIdx.y * blockDim.y + threadIdx.y;
             int i34v = blockIdx.z * blockDim.z + threadIdx.z;
             int i3v = i34v / n4v,
@@ -109,10 +87,7 @@ class TimCropperOp(GpuOp):
 
     def c_code(self, node, nodename, inp, out, sub):
         x, a, b, l, s = inp
-        if self.grad:
-            ddl, dds = out
-        else:
-            y, = out
+        y, = out
         fail = sub['fail']
         function_name = "TimCropper_%(nodename)s" % locals()
         ndim_spatial = len(self.output_shape)
@@ -148,7 +123,7 @@ class TimCropperOp(GpuOp):
             }
             """ % dict(var=var, i=1 + i))
 
-        # allocate outputs
+        # allocate output
         strings.append("""
         int ydims[$ndim_total];
         """)
@@ -156,23 +131,37 @@ class TimCropperOp(GpuOp):
             strings.append("ydims[%i] = CudaNdarray_HOST_DIMS($x)[%i];" % (i, i))
         for i, dim in enumerate(self.output_shape):
             strings.append("ydims[2 + %i] = %i;" % (i, dim))
-        for var in self.output_names:
-            strings.append("maybe_allocate_output($%s, ydims);" % var)
+        strings.append("""
+        if ((NULL == $y) || """ + " || ".join(
+            "(CudaNdarray_HOST_DIMS($y)[%i] != ydims[%i])" % (i, i) for i in range(ndim_total))
+        + """)
+        {
+            Py_XDECREF($y);
+            $y = (CudaNdarray*)CudaNdarray_New();
+            if ((NULL == $y)
+                || CudaNdarray_alloc_contiguous($y, $ndim_total, ydims))
+            {
+                Py_XDECREF($y);
+                $y = NULL;
+                PyErr_SetString(PyExc_ValueError,
+                                "TimCropper: output allocation failed");
+                $fail;
+            }
+        }
+        """)
 
         # launch kernel
         arguments = []
-        for var in ["x", self.output_names[0]]:
-            arguments.append("CudaNdarray_DEV_DIMS($%s)" % var)
+        for var in "x y".split():
             arguments.append("CudaNdarray_SIZE($%s)" % var)
-        for var in ["x"] + self.output_names:
             arguments.append("CudaNdarray_DEV_DATA($%s)" % var)
+            arguments.append("CudaNdarray_DEV_DIMS($%s)" % var)
             arguments.append("CudaNdarray_DEV_STRIDES($%s)" % var)
         arguments.extend("CudaNdarray_DEV_DATA($%s)" % var for var in "abls")
-        arguments = ", \n".join(arguments)
         strings.append("""
         {
             $grid_block_definition
-            $function_name<<<grid, block>>>($arguments)
+            $function_name<<<grid, block>>>(""" + ", \n".join(arguments) + """)
             CNDA_THREAD_SYNC;
             cudaError_t err = cudaGetLastError();
             if( cudaSuccess != err)
@@ -187,7 +176,7 @@ class TimCropperOp(GpuOp):
                 $fail;
             }
         }""")
- 
+
         from string import Template
         return Template("\n".join(strings)).substitute(locals())
 
@@ -201,28 +190,6 @@ class TimCropperOp(GpuOp):
         strings = []
         strings.append("""
         #include <stdio.h>
-        
-        void maybe_allocate_output(CudaNdarray* &y, int* ydims) {
-            if ((NULL == y) ||
-            """ +
-            " || ".join(
-                "(CudaNdarray_HOST_DIMS(y)[%i] != ydims[%i])" % (i, i) for i in range(ndim_total))
-            + """
-                )
-            {
-                Py_XDECREF(y);
-                y = (CudaNdarray*)CudaNdarray_New();
-                if ((NULL == y)
-                    || CudaNdarray_alloc_contiguous(y, $ndim_total, ydims))
-                {
-                    Py_XDECREF(y);
-                    y = NULL;
-                    PyErr_SetString(PyExc_ValueError,
-                                    "TimCropper: output allocation failed");
-                    $fail;
-                }
-            }
-        }
 
         __device__ void TimCropper_weight(float &w, int nv, int iv, int iV, float l, float s) {
             const float prior_sigma = 0.5;
@@ -243,11 +210,10 @@ class TimCropperOp(GpuOp):
         """)
 
         arguments = []
-        for side in "Vv":
-            arguments.append("const int* n%s" % side)
-            arguments.append("const size_t %s_size" % side)
-        for var in ["x"] + output_names:
+        for var in "x y".split():
+            arguments.append("const size_t %s_size" % var)
             arguments.append("%sfloat* %s" % ("const " if var == "x" else "", var))
+            arguments.append("const int* %s_dims" % var)
             arguments.append("const int* %s_strides" % var)
         # a, b, l, s are contiguous
         arguments.extend("const float* %s" % var for var in "abls")
@@ -260,22 +226,19 @@ class TimCropperOp(GpuOp):
         strings.append(self._thread_pixel_index())
 
         # compute output memory locations and initialize to zero
-        for var in self.output_names:
-            strings.append("size_t %(var)s_index = i0 * %(var)s_strides[0] + i1 * %(var)s_strides[1] + %(rest);"
-                           % dict(var=var,
-                                  rest=" + ".join("i%iv * %(var)s_strides[%i]"
-                                                  % dict(var=var, i=2 + 1)
-                                                  for i in range(ndim_spatial))))
-            strings.append("assert(0 <= %(var)s_index); assert(%(var)s_index < v_size);")
-            strings.append("%(var)s[%(var)s_index] = 0.0f;")
+        strings.append("size_t y_index = i0 * y_strides[0] + i1 * y_strides[1] + %s;"
+                       % " + ".join("i%(i)sv * y_strides[%(i)s]"
+                                    % dict(i=2 + i) for i in range(ndim_spatial)))
+        strings.append("assert(y_index < y_size);")
+        strings.append("y[y_index] = 0.0f;")
 
         for i in range(ndim_spatial):
             strings.append("""
-            int a%(i2)s = __float2int_rz(a[i0 * $ndim_spatial + %(i)s]),
-                b%(i2)s = __float2int_rd(b[i0 * $ndim_spatial + %(i)s]);
+            int a%(i2)s = (a[i0 * $ndim_spatial + %(i)s]),
+                b%(i2)s = (b[i0 * $ndim_spatial + %(i)s]);
             float l%(i2)s = l[i0 * $ndim_spatial + %(i)s],
                   s%(i2)s = s[i0 * $ndim_spatial + %(i)s];
-            assert(0 <= a%(i2)s); assert(a%(i2)s <= b%(i2)s); assert(b%(i2)s <= n%(i2)sV);
+            assert(0 <= a%(i2)s); assert(a%(i2)s <= b%(i2)s); assert(b%(i2)s <= x_dims[%(i2)s]);
             float w%(i2)s = 0;
             """ % dict(i=i, i2=2 + i))
 
@@ -283,18 +246,18 @@ class TimCropperOp(GpuOp):
         for i in range(ndim_spatial):
             strings.append("""
             for (int i%(i)sV = a%(i)s; i%(i)sV < b%(i)s; ++i%(i)sV) {
-                TimCropper_weight(w%(i)s, n%(i)sv, i%(i)sv, i%(i)sV, l%(i)s, s%(i)s);
+                TimCropper_weight(w%(i)s, y_dims[%(i)s], i%(i)sv, i%(i)sV, l%(i)s, s%(i)s);
             """ % dict(i=2 + i))
 
         # compute input memory location
         strings.append("size_t x_index = i0 * x_strides[0] + i1 * x_strides[1] + %s;"
-                        % " + ".join("i%iv * x_strides[%i]" % dict(i=2 + 1) for i in range(ndim_spatial)))
-        strings.append("assert(0 <= x_index); assert(x_index < V_size);")
+                        % " + ".join("i%(i)sV * x_strides[%(i)s]"
+                                     % dict(i=2 + i) for i in range(ndim_spatial)))
+        strings.append("assert(x_index < x_size);")
 
-        # compute weight and contribution
-        strings.append("float w = %s;" % " * ".join("w%i" % (2 + i) for i in range(ndim_spatial)))
-        for var in self.output_names:
-            strings.append("%s[%s_index] += w * x[x_index];" % (var, var))
+        # compute contribution
+        weight = " * ".join("w%i" % (2 + i) for i in range(ndim_spatial))
+        strings.append("y[y_index] += %s * x[x_index];" % weight)
 
         strings.extend("}" * (ndim_spatial + 1))
 
