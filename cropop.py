@@ -43,11 +43,13 @@ class TimCropperOp(GpuOp):
         x, a, b, l, s = inp
         dCdy, = grads
         dydl, dyds = TimCropperGradOp(self.patch_shape)(dCdy, x, a, b, l, s)
-        axes = range(1, ndim_total)
-        rval = 3 * [0.]
+        # a, b are not differentiable, and we don't care about backpropping through x for now
+        rval = [theano.gradient.disconnected_type() for i in range(3)]
+        # compute dCdl, dCds by tensordot summing over channels and spatial locations
+        axes = range(1, 2 + len(self.patch_shape))
         rval.extend(
             theano.tensor.basic._tensordot_as_dot(
-                dCdy, dydv, [axes, axes],
+                dCdy, dy, [axes, axes],
                 dot=theano.sandbox.cuda.blas.batched_dot,
                 batched=True)
             for dy in (dydl, dyds))
@@ -259,8 +261,8 @@ class TimCropperOp(GpuOp):
 
         for i in range(ndim_spatial):
             strings.append("""
-            int a%(i2)s = (a[i0 * $ndim_spatial + %(i)s]),
-                b%(i2)s = (b[i0 * $ndim_spatial + %(i)s]);
+            int a%(i2)s = a[i0 * $ndim_spatial + %(i)s],
+                b%(i2)s = b[i0 * $ndim_spatial + %(i)s];
             float l%(i2)s = l[i0 * $ndim_spatial + %(i)s],
                   s%(i2)s = s[i0 * $ndim_spatial + %(i)s];
             assert(0 <= a%(i2)s); assert(a%(i2)s <= b%(i2)s); assert(b%(i2)s <= x_dims[%(i2)s]);
@@ -317,13 +319,14 @@ class TimCropperGradOp(GpuOp):
 
         # we could return the much smaller dCdl, dCds but that
         # gives us very little room to parallelize (e.g. with batch
-        # size 100 and 3 spatial dimensions we have only 300
+        # size 100 and 3 spatial dimensions we have only 600
         # independently computable output elements).
-        broadcastable = list(inputs[0].type.broadcastable) + [False]
-        dtype = inputs[0].type.dtype
-        dydl_type = T.TensorType(broadcastable=broadcastable, dtype=dtype)
-        dyds_type = dydl_type
-        return Apply(self, inputs, [dydl_type, dyds_type])
+        output_type = CudaNdarrayType(
+            broadcastable=list(inputs[0].type.broadcastable) + [False],
+            dtype=inputs[0].type.dtype)
+        dydl = output_type()
+        dyds = output_type()
+        return Apply(self, inputs, [dydl, dyds])
 
     # TODO
     # def perform(self, node, input_storage, output_storage):
@@ -357,20 +360,20 @@ class TimCropperGradOp(GpuOp):
         if ndim_spatial == 2:
             return """
             // assuming C order
-            int i0 = blockIdx.x / outdims[1];
-            int i1 = blockIdx.x % outdims[1];
+            int i0 = blockIdx.x / dydl_dims[1];
+            int i1 = blockIdx.x % dydl_dims[1];
             int i2v = blockIdx.y * blockDim.y + threadIdx.y,
                 i3v = blockIdx.z * blockDim.z + threadIdx.z;
             """
         elif ndim_spatial == 3:
             return """
             // assuming C order
-            int i0 = blockIdx.x / outdims[1];
-            int i1 = blockIdx.x % outdims[1];
+            int i0 = blockIdx.x / dydl_dims[1];
+            int i1 = blockIdx.x % dydl_dims[1];
             int i2v = blockIdx.y * blockDim.y + threadIdx.y;
             int i34v = blockIdx.z * blockDim.z + threadIdx.z;
-            int i3v = i34v / outdims[4],
-                i4v = i34v % outdims[4];
+            int i3v = i34v / dydl_dims[4],
+                i4v = i34v % dydl_dims[4];
             """
         else:
             raise NotImplementedError()
@@ -420,9 +423,9 @@ class TimCropperGradOp(GpuOp):
         outdims[$ndim_total] = $ndim_spatial;
         """)
         for i in range(ndim_total):
-            strings.append("outdims[%i] = CudaNdarray_HOST_DIMS($x)[%i];" % (i, i));
+            strings.append("outdims[%i] = CudaNdarray_HOST_DIMS($dCdy)[%i];" % (i, i));
         for var in "ls":
-            strings.append("""
+            strings.append(("""
             if ((NULL == %(dname)s) || """ + " || ".join(
                 "(CudaNdarray_HOST_DIMS(%%(dname)s)[%i] != outdims[%i])" % (i, i) for i in range(ndim_total + 1))
             + """)
@@ -430,16 +433,16 @@ class TimCropperGradOp(GpuOp):
                 Py_XDECREF(%(dname)s);
                 %(dname)s = (CudaNdarray*)CudaNdarray_New();
                 if ((NULL == %(dname)s)
-                    || CudaNdarray_alloc_contiguous(%(dname)s, $ndim_total, CudaNdarray_HOST_DIMS(%(name)s)))
+                    || CudaNdarray_alloc_contiguous(%(dname)s, $ndim_total + 1, outdims))
                 {
                     Py_XDECREF(%(dname)s);
                     %(dname)s = NULL;
                     PyErr_SetString(PyExc_ValueError,
-                                    "TimCropperGrad: output allocation failed");
+                                    "TimCropperGrad: allocation of output %(dlabel)s failed");
                     $fail;
                 }
             }
-            """ % dict(name=locals()[var], dname=locals()["dyd" + var]))
+            """) % dict(name=locals()[var], dname=locals()["dyd" + var], dlabel="dyd" + var))
 
         # launch kernel
         arguments = []
@@ -472,7 +475,7 @@ class TimCropperGradOp(GpuOp):
         return Template("\n".join(strings)).substitute(locals())
 
     def c_support_code_apply(self, node, nodename):
-        function_name = "TimCropper_%s" % nodename
+        function_name = "TimCropperGrad_%s" % nodename
         ndim_spatial = len(self.patch_shape)
         ndim_total = 2 + ndim_spatial
         import math
@@ -534,20 +537,20 @@ class TimCropperGradOp(GpuOp):
 
         for i in range(ndim_spatial):
             strings.append("""
-            int a%(i2)s = (a[i0 * $ndim_spatial + %(i)s]),
-                b%(i2)s = (b[i0 * $ndim_spatial + %(i)s]);
-            float l%(i2)s = l[i0 * $ndim_spatial + %(i)s],
-                  s%(i2)s = s[i0 * $ndim_spatial + %(i)s];
+            const int a%(i2)s = a[i0 * $ndim_spatial + %(i)s],
+                      b%(i2)s = b[i0 * $ndim_spatial + %(i)s];
+            const float l%(i2)s = l[i0 * $ndim_spatial + %(i)s],
+                        s%(i2)s = s[i0 * $ndim_spatial + %(i)s];
             assert(0 <= a%(i2)s); assert(a%(i2)s <= b%(i2)s); assert(b%(i2)s <= x_dims[%(i2)s]);
             float w%(i2)s = 0, dw_dl%(i2)s = 0, dw_ds%(i2)s = 0;
             """ % dict(i=i, i2=2 + i))
 
         # loop over input pixel indices i{2, 3, ...}V
-        for i in range(ndim_spatial):
+        for i, patch_dim in enumerate(self.patch_shape):
             strings.append("""
             for (int i%(i)sV = a%(i)s; i%(i)sV < b%(i)s; ++i%(i)sV) {
-                TimCropperGrad_weight(w%(i)s, dw_dl%(i)s, dw_ds%(i)s, y_dims[%(i)s], i%(i)sv, i%(i)sV, l%(i)s, s%(i)s);
-            """ % dict(i=2 + i))
+                TimCropperGrad_weight(w%(i)s, dw_dl%(i)s, dw_ds%(i)s, %(patch_dim)s, i%(i)sv, i%(i)sV, l%(i)s, s%(i)s);
+            """ % dict(i=2 + i, patch_dim=patch_dim))
 
         # compute input memory location
         strings.append("size_t x_index = i0 * x_strides[0] + i1 * x_strides[1] + %s;"
@@ -562,10 +565,10 @@ class TimCropperGradOp(GpuOp):
         for var in "ls":
             for j in range(ndim_spatial):
                 weight = " * ".join(
-                    ("dw_d%s%i" if i == j else "w%i")
-                    % (var, 2 + i) for i in range(ndim_spatial))
+                    ("dw_d%s%%i" % var if i == j else "w%i")
+                    % (2 + i) for i in range(ndim_spatial))
                 strings.append("""
-                %(dvar)s[%(dvar)s_index%(j)s] += %(weight) * x[x_index];
+                %(dvar)s[%(dvar)s_index%(j)s] += %(weight)s * x[x_index];
                 """ % dict(dvar="dyd" + var, weight=weight, j=j))
 
         strings.extend("}" * (ndim_spatial + 1))
@@ -610,6 +613,18 @@ if __name__ == "__main__":
     np_l, np_s = np_l.astype(theano.config.floatX), np_s.astype(theano.config.floatX)
 
     np_y = np.asarray(f(np_x, np_a, np_b, np_l, np_s))
+
+    np_gys = theano.function([x, a, b, l, s], T.grad(y.mean(), [l, s]))(np_x, np_a, np_b, np_l, np_s);
+    print [(np_gy.shape, np_gy)
+           for np_gy in np_gys]
+
+    if False:
+        T.verify_grad(crop, [
+            np_x,
+            np_a.astype(theano.config.floatX),
+            np_b.astype(theano.config.floatX),
+            np_l, np_s],
+            rng=np.random)
 
     for image, patch, location, scale in itertools.izip(np_x, np_y, np_l, np_s):
         import matplotlib.pyplot as plt
