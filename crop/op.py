@@ -10,6 +10,7 @@ from theano.sandbox.cuda.basic_ops import (as_cuda_ndarray_variable,
 from theano.tensor import as_tensor_variable
 
 from grad import TimCropperGradOp
+import common
 
 class TimCropperOp(GpuOp):
     def __init__(self, patch_shape):
@@ -60,55 +61,6 @@ class TimCropperOp(GpuOp):
     def c_code_cache_version(self):
         return (0)
 
-    def _grid_block_definition(self):
-        dims = self.patch_shape
-        ndim_spatial = len(dims)
-        if ndim_spatial == 2:
-            return """
-            dim3 block(1, 32, 32);
-            dim3 grid(ydims[0] * ydims[1],
-                      (ydims[2] + block.y - 1) / block.y,
-                      (ydims[3] + block.z - 1) / block.z);
-            """
-        elif ndim_spatial == 3:
-            return """
-            dim3 block(1, 32, 32);
-            dim3 grid(ydims[0] * ydims[1],
-                      (ydims[2] + block.y - 1) / block.y,
-                      (ydims[3] * ydims[4] + block.z - 1) / block.z);
-            """
-        else:
-            raise NotImplementedError()
-
-    def _thread_pixel_index(self):
-        ndim_spatial = len(self.patch_shape)
-        if ndim_spatial == 2:
-            return """
-            // assuming C order
-            int i0 = blockIdx.x / x_dims[1],
-                i1 = blockIdx.x % x_dims[1],
-                i2v = blockIdx.y * blockDim.y + threadIdx.y,
-                i3v = blockIdx.z * blockDim.z + threadIdx.z;
-            // do nothing if out of bounds
-            if (i0 >= y_dims[0] || i1 >= y_dims[1] || i2v >= y_dims[2] || i3v >= y_dims[3])
-                return;
-            """
-        elif ndim_spatial == 3:
-            return """
-            // assuming C order
-            int i0 = blockIdx.x / x_dims[1],
-                i1 = blockIdx.x % x_dims[1],
-                i2v = blockIdx.y * blockDim.y + threadIdx.y;
-            int i34v = blockIdx.z * blockDim.z + threadIdx.z;
-            int i3v = i34v / n4v,
-                i4v = i34v % n4v;
-            // do nothing if out of bounds
-            if (i0 >= y_dims[0] || i1 >= y_dims[1] || i2v >= y_dims[2] || i3v >= y_dims[3] || i4v >= y_dims[4])
-                return;
-            """
-        else:
-            raise NotImplementedError()
-
     def c_code(self, node, nodename, inp, out, sub):
         x, a, b, l, s = inp
         y, = out
@@ -116,7 +68,6 @@ class TimCropperOp(GpuOp):
         function_name = "TimCropper_%(nodename)s" % locals()
         ndim_spatial = len(self.patch_shape)
         ndim_total = 2 + ndim_spatial
-        grid_block_definition = self._grid_block_definition()
         strings = []
 
         # check inputs
@@ -182,10 +133,11 @@ class TimCropperOp(GpuOp):
             arguments.append("CudaNdarray_DEV_DIMS($%s)" % var)
             arguments.append("CudaNdarray_DEV_STRIDES($%s)" % var)
         arguments.extend("CudaNdarray_DEV_DATA($%s)" % var for var in "abls")
+        gridblock = common.gridblock(ndim_spatial, "ydims")
         strings.append("""
         {
             printf("enter op\\n");
-            $grid_block_definition
+            $gridblock
             $function_name<<<grid, block>>>(""" + ", \n".join(arguments) + """)
             CNDA_THREAD_SYNC;
             cudaError_t err = cudaGetLastError();
@@ -208,6 +160,8 @@ class TimCropperOp(GpuOp):
 
     def c_support_code_apply(self, node, nodename):
         function_name = "TimCropper_%s" % nodename
+        weight_function_name = "%s_weight" % function_name
+
         ndim_spatial = len(self.patch_shape)
         ndim_total = 2 + ndim_spatial
         import math
@@ -216,22 +170,9 @@ class TimCropperOp(GpuOp):
         strings = []
         strings.append("""
         #include <stdio.h>
-
-        __device__ void TimCropper_weight(float &w, int nv, int iv, int iV, float l, float s) {
-            const float prior_sigma = 0.5;
-            float xV = iV;
-            float div = (iv - nv/2);
-            float xv = div / s + l;
-            float delta = (xV - xv);
-            // bound the influence of scale on sigma to avoid the kernels
-            // becoming too narrow when zooming in.
-            //float sigma = prior_sigma / min(s, .9);
-            float sigma = prior_sigma / s;
-            float delta2 = delta * delta, sigma2 = sigma * sigma, s2 = s * s;
-            float delta2_sigma2 = delta2 / sigma2;
-            w = exp(-0.5 * delta2_sigma2) / sqrt(2*M_PI) / sigma;
-        }
         """)
+        strings.append(common.weightfunction(
+            name=weight_function_name, grad=False))
 
         arguments = []
         for var in "x y".split():
@@ -243,12 +184,12 @@ class TimCropperOp(GpuOp):
         arguments.extend("const float* %s" % var for var in "abls")
         arguments = ", \n".join(arguments)
 
+        threadindex = common.threadindex(ndim_spatial, "y_dims")
+
         strings.append("""
         __global__ void $function_name($arguments) {
+            $threadindex
         """)
-        # compute output pixel index i0, i1, i*v
-        strings.append(self._thread_pixel_index())
-
         # compute output memory locations and initialize to zero
         strings.append("size_t y_index = i0 * y_strides[0] + i1 * y_strides[1] + %s;"
                        % " + ".join("i%(i)sv * y_strides[%(i)s]"
@@ -281,7 +222,7 @@ class TimCropperOp(GpuOp):
         for i in range(ndim_spatial):
             strings.append("""
             for (int i%(i)sV = a%(i)s; i%(i)sV < b%(i)s; ++i%(i)sV) {
-                TimCropper_weight(w%(i)s, y_dims[%(i)s], i%(i)sv, i%(i)sV, l%(i)s, s%(i)s);
+                $weight_function_name(w%(i)s, y_dims[%(i)s], i%(i)sv, i%(i)sV, l%(i)s, s%(i)s);
             """ % dict(i=2 + i))
 
         # compute input memory location

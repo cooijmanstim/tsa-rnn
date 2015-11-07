@@ -9,6 +9,8 @@ from theano.sandbox.cuda.basic_ops import (as_cuda_ndarray_variable,
                                            gpu_contiguous, host_from_gpu)
 from theano.tensor import as_tensor_variable
 
+import common
+
 class TimCropperGradOp(GpuOp):
     def __init__(self, patch_shape):
         # NOTE: patch_shape specifies spatial dimensions only
@@ -52,63 +54,13 @@ class TimCropperGradOp(GpuOp):
     def c_code_cache_version(self):
         return (0)
 
-    def _grid_block_definition(self):
-        dims = self.patch_shape
-        ndim_spatial = len(dims)
-        if ndim_spatial == 2:
-            return """
-            dim3 block(1, 32, 32);
-            dim3 grid(outdims[0] * outdims[1],
-                      (outdims[2] + block.y - 1) / block.y,
-                      (outdims[3] + block.z - 1) / block.z);
-            """
-        elif ndim_spatial == 4:
-            return """
-            dim3 block(1, 32, 32);
-            dim3 grid(outdims[0] * outdims[1],
-                      (outdims[2] + block.y - 1) / block.y,
-                      (outdims[3] * outdims[4] + block.z - 1) / block.z);
-            """
-        else:
-            raise NotImplementedError()
-
-    def _thread_pixel_index(self):
-        ndim_spatial = len(self.patch_shape)
-        if ndim_spatial == 2:
-            return """
-            // assuming C order
-            int i0 = blockIdx.x / dydl_dims[1];
-            int i1 = blockIdx.x % dydl_dims[1];
-            int i2v = blockIdx.y * blockDim.y + threadIdx.y,
-                i3v = blockIdx.z * blockDim.z + threadIdx.z;
-            // do nothing if out of bounds
-            if (i0 >= dydl_dims[0] || i1 >= dydl_dims[1] || i2v >= dydl_dims[2] || i3v >= dydl_dims[3])
-                return;
-            """
-        elif ndim_spatial == 3:
-            return """
-            // assuming C order
-            int i0 = blockIdx.x / dydl_dims[1];
-            int i1 = blockIdx.x % dydl_dims[1];
-            int i2v = blockIdx.y * blockDim.y + threadIdx.y;
-            int i34v = blockIdx.z * blockDim.z + threadIdx.z;
-            int i3v = i34v / dydl_dims[4],
-                i4v = i34v % dydl_dims[4];
-            // do nothing if out of bounds
-            if (i0 >= dydl_dims[0] || i1 >= dydl_dims[1] || i2v >= dydl_dims[2] || i3v >= dydl_dims[3] || i4v >= dydl_dims[4])
-                return;
-            """
-        else:
-            raise NotImplementedError()
-
     def c_code(self, node, nodename, inp, out, sub):
         dCdy, x, a, b, l, s = inp
         dydl, dyds = out
         fail = sub['fail']
-        function_name = "TimCropperGrad_%(nodename)s" % locals()
+        function_name = "TimCropperGrad_%s" % nodename
         ndim_spatial = len(self.patch_shape)
         ndim_total = 2 + ndim_spatial
-        grid_block_definition = self._grid_block_definition()
         strings = []
 
         # check inputs
@@ -175,10 +127,11 @@ class TimCropperGradOp(GpuOp):
             arguments.append("CudaNdarray_DEV_DIMS($%s)" % var)
             arguments.append("CudaNdarray_DEV_STRIDES($%s)" % var)
         arguments.extend("CudaNdarray_DEV_DATA($%s)" % var for var in "abls")
+        gridblock = common.gridblock(ndim_spatial, "CudaNdarray_HOST_DIMS(%s)" % dCdy)
         strings.append("""
         {
             printf("enter grad op\\n");
-            $grid_block_definition
+            $gridblock
             $function_name<<<grid, block>>>(""" + ", \n".join(arguments) + """)
             CNDA_THREAD_SYNC;
             cudaError_t err = cudaGetLastError();
@@ -201,6 +154,7 @@ class TimCropperGradOp(GpuOp):
 
     def c_support_code_apply(self, node, nodename):
         function_name = "TimCropperGrad_%s" % nodename
+        weight_function_name = "%s_weight" % function_name
         ndim_spatial = len(self.patch_shape)
         ndim_total = 2 + ndim_spatial
         import math
@@ -209,27 +163,11 @@ class TimCropperGradOp(GpuOp):
         strings = []
         strings.append("""
         #include <stdio.h>
-
-        __device__ void TimCropperGrad_weight(float &w, float &dw_dl, float &dw_ds, int nv, int iv, int iV, float l, float s) {
-            const float prior_sigma = 0.5;
-            float xV = iV;
-            float div = (iv - nv/2);
-            float xv = div / s + l;
-            float delta = (xV - xv);
-            // bound the influence of scale on sigma to avoid the kernels
-            // becoming too narrow when zooming in.
-            //const float s_bound = .9;
-            //float sigma = prior_sigma / min(s, s_bound);
-            float sigma = prior_sigma / s;
-            float delta2 = delta * delta, sigma2 = sigma * sigma, s2 = s * s;
-            float delta2_sigma2 = delta2 / sigma2;
-            float g = exp(-0.5 * delta2_sigma2) / sqrt(2*M_PI) / sigma;
-            w = g;
-            dw_dl = g * -delta / sigma2;
-            // FIXME: rederive for bounded s
-            dw_ds = g * (div * delta / sigma2 - s * (delta2_sigma2 - 1)) / s2;
-        }
         """)
+
+        strings.append(common.weightfunction(
+            name=weight_function_name,
+            grad=True))
 
         arguments = []
         for var in "dydl dyds dCdy x".split():
@@ -241,11 +179,12 @@ class TimCropperGradOp(GpuOp):
         arguments.extend("const float* %s" % var for var in "abls")
         arguments = ", \n".join(arguments)
 
+        threadindex = common.threadindex(ndim_spatial, "dCdy_dims")
+
         strings.append("""
         __global__ void $function_name($arguments) {
+            $threadindex
         """)
-        # compute output index i0, i1, i*v
-        strings.append(self._thread_pixel_index())
 
         # compute output memory locations and initialize to zero
         for var in "dydl dyds".split():
@@ -275,7 +214,7 @@ class TimCropperGradOp(GpuOp):
         for i, patch_dim in enumerate(self.patch_shape):
             strings.append("""
             for (int i%(i)sV = a%(i)s; i%(i)sV < b%(i)s; ++i%(i)sV) {
-                TimCropperGrad_weight(w%(i)s, dw_dl%(i)s, dw_ds%(i)s, %(patch_dim)s, i%(i)sv, i%(i)sV, l%(i)s, s%(i)s);
+                $weight_function_name(w%(i)s, dw_dl%(i)s, dw_ds%(i)s, %(patch_dim)s, i%(i)sv, i%(i)sV, l%(i)s, s%(i)s);
             """ % dict(i=2 + i, patch_dim=patch_dim))
 
         # compute input memory location
