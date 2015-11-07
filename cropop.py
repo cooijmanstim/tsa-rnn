@@ -87,6 +87,9 @@ class TimCropperOp(GpuOp):
                 i1 = blockIdx.x % x_dims[1],
                 i2v = blockIdx.y * blockDim.y + threadIdx.y,
                 i3v = blockIdx.z * blockDim.z + threadIdx.z;
+            // do nothing if out of bounds
+            if (i0 >= y_dims[0] || i1 >= y_dims[1] || i2v >= y_dims[2] || i3v >= y_dims[3])
+                return;
             """
         elif ndim_spatial == 3:
             return """
@@ -97,6 +100,9 @@ class TimCropperOp(GpuOp):
             int i34v = blockIdx.z * blockDim.z + threadIdx.z;
             int i3v = i34v / n4v,
                 i4v = i34v % n4v;
+            // do nothing if out of bounds
+            if (i0 >= y_dims[0] || i1 >= y_dims[1] || i2v >= y_dims[2] || i3v >= y_dims[3] || i4v >= y_dims[4])
+                return;
             """
         else:
             raise NotImplementedError()
@@ -215,13 +221,11 @@ class TimCropperOp(GpuOp):
             float delta = (xV - xv);
             // bound the influence of scale on sigma to avoid the kernels
             // becoming too narrow when zooming in.
-            float sigma = prior_sigma / min(s, .9);
+            //float sigma = prior_sigma / min(s, .9);
+            float sigma = prior_sigma / s;
             float delta2 = delta * delta, sigma2 = sigma * sigma, s2 = s * s;
             float delta2_sigma2 = delta2 / sigma2;
-            float g = exp(-0.5 * delta2_sigma2) / sqrt(2*M_PI) / sigma;
-            w = g;
-            float dw_dl = g * -delta / sigma2;
-            float dw_ds = g * (div * delta / sigma2 - s * (delta2_sigma2 - 1)) / s2;
+            w = exp(-0.5 * delta2_sigma2) / sqrt(2*M_PI) / sigma;
         }
         """)
 
@@ -364,6 +368,9 @@ class TimCropperGradOp(GpuOp):
             int i1 = blockIdx.x % dydl_dims[1];
             int i2v = blockIdx.y * blockDim.y + threadIdx.y,
                 i3v = blockIdx.z * blockDim.z + threadIdx.z;
+            // do nothing if out of bounds
+            if (i0 >= dydl_dims[0] || i1 >= dydl_dims[1] || i2v >= dydl_dims[2] || i3v >= dydl_dims[3])
+                return;
             """
         elif ndim_spatial == 3:
             return """
@@ -374,6 +381,9 @@ class TimCropperGradOp(GpuOp):
             int i34v = blockIdx.z * blockDim.z + threadIdx.z;
             int i3v = i34v / dydl_dims[4],
                 i4v = i34v % dydl_dims[4];
+            // do nothing if out of bounds
+            if (i0 >= dydl_dims[0] || i1 >= dydl_dims[1] || i2v >= dydl_dims[2] || i3v >= dydl_dims[3] || i4v >= dydl_dims[4])
+                return;
             """
         else:
             raise NotImplementedError()
@@ -493,16 +503,16 @@ class TimCropperGradOp(GpuOp):
             float delta = (xV - xv);
             // bound the influence of scale on sigma to avoid the kernels
             // becoming too narrow when zooming in.
-            const float s_bound = .9;
-            float sigma = prior_sigma / min(s, s_bound);
+            //const float s_bound = .9;
+            //float sigma = prior_sigma / min(s, s_bound);
+            float sigma = prior_sigma / s;
             float delta2 = delta * delta, sigma2 = sigma * sigma, s2 = s * s;
             float delta2_sigma2 = delta2 / sigma2;
             float g = exp(-0.5 * delta2_sigma2) / sqrt(2*M_PI) / sigma;
             w = g;
             dw_dl = g * -delta / sigma2;
-            // FIXME: if s > s_bound, s still affects delta!!
-            dw_ds = g * ((s < s_bound) ? (div * delta / sigma2 - s * (delta2_sigma2 - 1)) / s2
-                                       : 0);
+            // FIXME: rederive for bounded s
+            dw_ds = g * (div * delta / sigma2 - s * (delta2_sigma2 - 1)) / s2;
         }
         """)
 
@@ -546,6 +556,7 @@ class TimCropperGradOp(GpuOp):
             """ % dict(i=i, i2=2 + i))
 
         # loop over input pixel indices i{2, 3, ...}V
+        # TODO: compute x_index progressively; x_index += relevant_stride
         for i, patch_dim in enumerate(self.patch_shape):
             strings.append("""
             for (int i%(i)sV = a%(i)s; i%(i)sV < b%(i)s; ++i%(i)sV) {
@@ -588,7 +599,7 @@ if __name__ == "__main__":
              T.cast(a, theano.config.floatX),
              T.cast(b, theano.config.floatX),
              l, s)
-    f = theano.function([x, a, b, l, s], host_from_gpu(y))
+    f = theano.function([x, a, b, l, s], y)
 
     def load_frame(bytes):
         from PIL import Image
@@ -615,22 +626,26 @@ if __name__ == "__main__":
     np_y = np.asarray(f(np_x, np_a, np_b, np_l, np_s))
 
     np_gys = theano.function([x, a, b, l, s], T.grad(y.mean(), [l, s]))(np_x, np_a, np_b, np_l, np_s);
-    print [(np_gy.shape, np_gy)
-           for np_gy in np_gys]
+    print [(np_gy.shape, np_gy) for np_gy in np_gys]
+
+    if True:
+        print "verifying grad"
+        T.verify_grad(
+            lambda l, s: crop(
+                T.constant(np_x),
+                T.constant(np_a.astype(theano.config.floatX)),
+                T.constant(np_b.astype(theano.config.floatX)),
+                l, s),
+            [np_l, np_s],
+            rng=np.random)
+        print "grad verified"
 
     if False:
-        T.verify_grad(crop, [
-            np_x,
-            np_a.astype(theano.config.floatX),
-            np_b.astype(theano.config.floatX),
-            np_l, np_s],
-            rng=np.random)
-
-    for image, patch, location, scale in itertools.izip(np_x, np_y, np_l, np_s):
-        import matplotlib.pyplot as plt
-        plt.figure()
-        plt.imshow(np.rollaxis(image, 0, image.ndim), interpolation="nearest")
-        plt.figure()
-        plt.imshow(np.rollaxis(patch, 0, patch.ndim), interpolation="nearest")
-        plt.title("l %s s %s" % (location, scale))
-        plt.show()
+        for image, patch, location, scale in itertools.izip(np_x, np_y, np_l, np_s):
+            import matplotlib.pyplot as plt
+            plt.figure()
+            plt.imshow(np.rollaxis(image, 0, image.ndim), interpolation="nearest")
+            plt.figure()
+            plt.imshow(np.rollaxis(patch, 0, patch.ndim), interpolation="nearest")
+            plt.title("l %s s %s" % (location, scale))
+            plt.show()
