@@ -181,23 +181,51 @@ class TimCropperGradOp(GpuOp):
 
         threadindex = common.threadindex(ndim_spatial, "dCdy_dims")
 
+        # generate code that does output initialization and computation. this is
+        # best kept together in the python code to reduce confusion.
+        initializations = []
+        computations = []
+        for var in "ls":
+            dy = "dyd" + var
+            dw = "dwd" + var
+
+            # patch pixel index; we need to compute dydl[0]..dydl[ndim_spatial]
+            # for each pixel, so one more subscript is needed to fully qualify
+            # the output element.
+            output_indexish = (
+                "i0 * %(dy)s_strides[0] + i1 * %(dy)s_strides[1] + %(rest)s"
+                % dict(dy=dy, rest=" + ".join(
+                    "i%(i)sv * %(dy)s_strides[%(i)s]"
+                    % dict(dy=dy, i=2 + i) for i in range(ndim_spatial))))
+
+            for j in range(ndim_spatial):
+                index = ("%(output_indexish)s + %(j)s * %(dy)s_strides[$ndim_total]"
+                        % dict(output_indexish=output_indexish, dy=dy, j=j))
+
+                # initialize to zero
+                initializations.append("""
+                assert(%(index)s < %(dy)s_size);
+                %(dy)s[%(index)s] = 0.0f;
+                """ % dict(dy=dy, index=index))
+
+                # compute contribution
+                # for dy/dl[0], weight = dw/dl0 * w1 * w2
+                # for dy/dl[1], weight = w0 * dw/dl1 * w2
+                # for dy/dl[2], weight = w0 * w1 * dw/dl2
+                # etc. and similarly dy/ds
+                weight = " * ".join(
+                    (dw if i == j else "w") + str(2 + i)
+                    for i in range(ndim_spatial))
+                computations.append("""
+                assert(%(index)s < %(dy)s_size);
+                %(dy)s[%(index)s] += %(weight)s * x[x_index];
+                """ % dict(dy=dy, weight=weight, index=index))
+
         strings.append("""
         __global__ void $function_name($arguments) {
             $threadindex
         """)
-
-        # compute output memory locations and initialize to zero
-        for var in "dydl dyds".split():
-            strings.append("size_t %(var)s_indexish = i0 * %(var)s_strides[0] + i1 * %(var)s_strides[1] + %(rest)s;"
-                           % dict(var=var,
-                                  rest=" + ".join("i%(i)sv * %(var)s_strides[%(i)s]"
-                                                  % dict(var=var, i=2 + i) for i in range(ndim_spatial))))
-            for i in range(ndim_spatial):
-                strings.append("""
-                size_t %(var)s_index%(i)s = %(var)s_indexish + %(i)s * %(var)s_strides[$ndim_total];
-                assert(%(var)s_index%(i)s < %(var)s_size);
-                %(var)s[%(var)s_index%(i)s] = 0.0f;
-                """ % dict(var=var, i=i))
+        strings.append("\n".join(initializations))
 
         for i in range(ndim_spatial):
             strings.append("""
@@ -206,36 +234,21 @@ class TimCropperGradOp(GpuOp):
             const float l%(i2)s = l[i0 * $ndim_spatial + %(i)s],
                         s%(i2)s = s[i0 * $ndim_spatial + %(i)s];
             assert(0 <= a%(i2)s); assert(a%(i2)s <= b%(i2)s); assert(b%(i2)s <= x_dims[%(i2)s]);
-            float w%(i2)s = 0, dw_dl%(i2)s = 0, dw_ds%(i2)s = 0;
+            float w%(i2)s = 0, dwdl%(i2)s = 0, dwds%(i2)s = 0;
             """ % dict(i=i, i2=2 + i))
 
         # loop over input pixel indices i{2, 3, ...}V
-        # TODO: compute x_index progressively; x_index += relevant_stride
         for i, patch_dim in enumerate(self.patch_shape):
             strings.append("""
             for (int i%(i)sV = a%(i)s; i%(i)sV < b%(i)s; ++i%(i)sV) {
-                $weight_function_name(w%(i)s, dw_dl%(i)s, dw_ds%(i)s, %(patch_dim)s, i%(i)sv, i%(i)sV, l%(i)s, s%(i)s);
+                $weight_function_name(w%(i)s, dwdl%(i)s, dwds%(i)s, %(patch_dim)s, i%(i)sv, i%(i)sV, l%(i)s, s%(i)s);
             """ % dict(i=2 + i, patch_dim=patch_dim))
-
         # compute input memory location
         strings.append("size_t x_index = i0 * x_strides[0] + i1 * x_strides[1] + %s;"
                         % " + ".join("i%(i)sV * x_strides[%(i)s]"
                                      % dict(i=2 + i) for i in range(ndim_spatial)))
         strings.append("assert(x_index < x_size);")
-
-        # compute contribution
-        # for dy/dl[0], weight = dw_dl0 * w1 * w2
-        # for dy/dl[1], weight = w0 * dw_dl1 * w2
-        # etc. and similarly dy/ds
-        for var in "ls":
-            for j in range(ndim_spatial):
-                weight = " * ".join(
-                    ("dw_d%s%%i" % var if i == j else "w%i")
-                    % (2 + i) for i in range(ndim_spatial))
-                strings.append("""
-                %(dvar)s[%(dvar)s_index%(j)s] += %(weight)s * x[x_index];
-                """ % dict(dvar="dyd" + var, weight=weight, j=j))
-
+        strings.append("\n".join(computations))
         strings.extend("}" * (ndim_spatial + 1))
 
         from string import Template

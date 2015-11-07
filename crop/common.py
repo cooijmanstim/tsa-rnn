@@ -25,20 +25,20 @@ def threadindex(ndim_spatial, patch_dims):
     if ndim_spatial == 2:
         strings.append("""
         // assuming C order
-        int i0 = blockIdx.x / $patch_dims[1],
-            i1 = blockIdx.x % $patch_dims[1],
-            i2v = blockIdx.y * blockDim.y + threadIdx.y,
-            i3v = blockIdx.z * blockDim.z + threadIdx.z;
+        const int i0 = blockIdx.x / $patch_dims[1],
+                  i1 = blockIdx.x % $patch_dims[1],
+                  i2v = blockIdx.y * blockDim.y + threadIdx.y,
+                  i3v = blockIdx.z * blockDim.z + threadIdx.z;
         """)
     elif ndim_spatial == 3:
         strings.append("""
         // assuming C order
-        int i0 = blockIdx.x / $patch_dims[1],
-            i1 = blockIdx.x % $patch_dims[1],
-            i2v = blockIdx.y * blockDim.y + threadIdx.y;
-        int i34v = blockIdx.z * blockDim.z + threadIdx.z;
-        int i3v = i34v / $patch_dims[4],
-            i4v = i34v % $patch_dims[4];
+        const int i0 = blockIdx.x / $patch_dims[1],
+                  i1 = blockIdx.x % $patch_dims[1],
+                  i2v = blockIdx.y * blockDim.y + threadIdx.y;
+        const int i34v = blockIdx.z * blockDim.z + threadIdx.z;
+        const int i3v = i34v / $patch_dims[4],
+                  i4v = i34v % $patch_dims[4];
         """)
     else:
         raise NotImplementedError()
@@ -50,26 +50,25 @@ def threadindex(ndim_spatial, patch_dims):
     return Template("\n".join(strings)).substitute(locals())
 
 def weightfunction(name, grad=False):
-    grad_arguments = "float &dw_dl, float &dw_ds," if grad else ""
+    grad_arguments = "float &dwdl, float &dwds," if grad else ""
     grad_assignments = """
-        dw_dl = w * -delta / sigma2;
+        dwdl = w * -delta / sigma / sigma;
         // FIXME: rederive for bounded s
-        dw_ds = w * (div * delta / sigma2 - s * (delta2_sigma2 - 1)) / s2;
+        dwds = w * ((iv - nv/2) * delta / sigma / sigma - s * (delta * delta / sigma / sigma - 1)) / s / s;
     """ if grad else ""
-    return Template("""__device__ void $name(float &w, $grad_arguments int nv, int iv, int iV, float l, float s) {
-        const float prior_sigma = 0.5;
-        float xV = iV;
-        float div = (iv - nv/2);
-        float xv = div / s + l;
-        float delta = (xV - xv);
+    return Template("""__device__ void $name(
+            float &w, $grad_arguments
+            const int nv, const int iv, const int iV,
+            const float l, const float s) {
+        #define prior_sigma 0.5
+        const float delta = iV - (iv - nv/2) / s + l;
         // bound the influence of scale on sigma to avoid the kernels
         // becoming too narrow when zooming in.
-        //const float s_bound = .9;
-        //float sigma = prior_sigma / min(s, s_bound);
-        float sigma = prior_sigma / s;
-        float delta2 = delta * delta, sigma2 = sigma * sigma, s2 = s * s;
-        float delta2_sigma2 = delta2 / sigma2;
-        w = exp(-0.5 * delta2_sigma2) / sqrt(2*M_PI) / sigma;
+        #define s_bound = .9;
+        //const float sigma = prior_sigma / min(s, s_bound);
+        const float sigma = prior_sigma / s;
+
+        w = exp(-0.5 * delta * delta / sigma / sigma) / sqrt(2*M_PI) / sigma;
         $grad_assignments
     }
     """).substitute(locals())

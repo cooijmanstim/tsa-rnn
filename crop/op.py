@@ -46,15 +46,16 @@ class TimCropperOp(GpuOp):
         x, a, b, l, s = inp
         dCdy, = grads
         dydl, dyds = TimCropperGradOp(self.patch_shape)(dCdy, x, a, b, l, s)
+
+        # for some reason we are given dCdy with an extra broadcastable first dimension?
+        dCdy = dCdy[0]
+
         # a, b are not differentiable, and we don't care about backpropping through x for now
         rval = [theano.gradient.disconnected_type() for i in range(3)]
-        # compute dCdl, dCds by tensordot summing over channels and spatial locations
-        axes = range(1, 2 + len(self.patch_shape))
+        # compute dCdl, dCds by summing the product over channels and spatial locations
+        # (a simple case for which we don't need batched_tensordot)
         rval.extend(
-            theano.tensor.basic._tensordot_as_dot(
-                dCdy, dy, [axes, axes],
-                dot=theano.sandbox.cuda.blas.batched_dot,
-                batched=True)
+            (tensor.shape_padright(dCdy) * dy).sum(range(1, dCdy.ndim + 1))
             for dy in (dydl, dyds))
         return rval
 
@@ -219,12 +220,11 @@ class TimCropperOp(GpuOp):
             """ % dict(i=i, i2=2 + i))
 
         # loop over input pixel indices i{2, 3, ...}V
-        for i in range(ndim_spatial):
+        for i, patch_dim in enumerate(self.patch_shape):
             strings.append("""
             for (int i%(i)sV = a%(i)s; i%(i)sV < b%(i)s; ++i%(i)sV) {
-                $weight_function_name(w%(i)s, y_dims[%(i)s], i%(i)sv, i%(i)sV, l%(i)s, s%(i)s);
-            """ % dict(i=2 + i))
-
+                $weight_function_name(w%(i)s, %(patch_dim)s, i%(i)sv, i%(i)sV, l%(i)s, s%(i)s);
+            """ % dict(i=2 + i, patch_dim=patch_dim))
         # compute input memory location
         strings.append("size_t x_index = i0 * x_strides[0] + i1 * x_strides[1] + %s;"
                         % " + ".join("i%(i)sV * x_strides[%(i)s]"
