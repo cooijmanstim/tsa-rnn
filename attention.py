@@ -68,31 +68,29 @@ class RecurrentAttentionModel(object):
         # construct patch interpretation network
         patch_transforms = []
         if patch_cnn_spec == "pretrained":
-            assert not patch_mlp_spec
             import pretrained
-            self.patch_transform = pretrained.get_patch_transform(**hyperparameters)
+            patch_transforms.append(pretrained.get_patch_transform(**hyperparameters))
+        elif patch_cnn_spec:
+            patch_transforms.append(masonry.construct_cnn(
+                name="patch_cnn",
+                layer_specs=patch_cnn_spec,
+                input_shape=patch_shape,
+                n_channels=n_channels,
+                batch_normalize=batch_normalize_patch))
+            shape = patch_transforms[-1].get_dim("output")
         else:
-            if patch_cnn_spec:
-                patch_transforms.append(masonry.construct_cnn(
-                    name="patch_cnn",
-                    layer_specs=patch_cnn_spec,
-                    input_shape=patch_shape,
-                    n_channels=n_channels,
-                    batch_normalize=batch_normalize_patch))
-                shape = patch_transforms[-1].get_dim("output")
-            else:
-                shape = (n_channels,) + tuple(patch_shape)
-            patch_transforms.append(bricks.FeedforwardFlattener(input_shape=shape))
-            if patch_mlp_spec:
-                patch_transforms.append(masonry.construct_mlp(
-                    name="patch_mlp",
-                    hidden_dims=patch_mlp_spec,
-                    input_dim=patch_transforms[-1].output_dim,
-                    weights_init=initialization.Orthogonal(),
-                    biases_init=initialization.Constant(0),
-                    batch_normalize=batch_normalize_patch))
-            self.patch_transform = bricks.FeedforwardSequence(
-                [brick.apply for brick in patch_transforms], name="ffs")
+            shape = (n_channels,) + tuple(patch_shape)
+        patch_transforms.append(bricks.FeedforwardFlattener(input_shape=shape))
+        if patch_mlp_spec:
+            patch_transforms.append(masonry.construct_mlp(
+                name="patch_mlp",
+                hidden_dims=patch_mlp_spec,
+                input_dim=patch_transforms[-1].output_dim,
+                weights_init=initialization.Orthogonal(),
+                biases_init=initialization.Constant(0),
+                batch_normalize=batch_normalize_patch))
+        self.patch_transform = bricks.FeedforwardSequence(
+            [brick.apply for brick in patch_transforms], name="ffs")
 
         # construct theta interpretation network
         self.merge_mlp = masonry.construct_mlp(

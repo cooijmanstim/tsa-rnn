@@ -11,6 +11,7 @@ class PatchTransform(Brick):
     def apply(self, patch):
         if len(self.patch_shape) == 3:
             output = create_theano_expressions(
+                mode="rgb",
                 inputs=("data",
                         (patch
                          .dimshuffle(0, 2, 1, 3, 4)
