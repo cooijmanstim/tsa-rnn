@@ -53,8 +53,12 @@ def weightfunction(name, grad=False):
     grad_arguments = "float &dwdl, float &dwds," if grad else ""
     grad_assignments = """
         dwdl = w * -delta / sigma / sigma;
-        // FIXME: rederive for bounded s
-        dwds = w * ((iv - nv/2) * delta / sigma / sigma - s * (delta * delta / sigma / sigma - 1)) / s / s;
+        dwds = w * (
+            // through effect on delta
+            (iv - nv/2) * delta / sigma -
+            // through effect on sigma
+            (s < 1) * prior_sigma * (delta * delta / sigma /sigma - 1)
+        ) / sigma / s / s;
     """ if grad else ""
     return Template("""
     #define prior_sigma 0.5

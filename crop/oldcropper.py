@@ -1,12 +1,15 @@
-import math
+import math, logging
 import numpy as np
 import theano
 import theano.tensor as T
 import util
 
+logger = logging.getLogger(__name__)
 floatX = theano.config.floatX
 
 from blocks.bricks import Brick, application
+
+from op import TimCropperOp
 
 class LocallySoftRectangularCropper(Brick):
     def __init__(self, patch_shape, kernel, hyperparameters, **kwargs):
@@ -15,9 +18,11 @@ class LocallySoftRectangularCropper(Brick):
         self.kernel = kernel
         self.cutoff = hyperparameters["cutoff"]
         self.batched_window = hyperparameters["batched_window"]
+        self.scan = hyperparameters["scan"]
+        if not self.batched_window and not self.scan:
+            logger.warning("using experimental cropper op")
+            self.cropop = TimCropperOp(patch_shape)
         self.n_spatial_dims = len(patch_shape)
-        self.batch_size = hyperparameters["batch_size"]
-        self.batch_size_constant = hyperparameters["batch_size_constant"]
 
     def compute_crop_matrices(self, locations, scales, Is):
         Ws = []
@@ -67,24 +72,6 @@ class LocallySoftRectangularCropper(Brick):
 
         return a, b
 
-    def apply_aaargh(self, image, location, scale, a, b):
-        def map_fn(image, a, b, location, scale):
-            # apply_inner expects a batch axis
-            image = T.shape_padleft(image)
-            location = T.shape_padleft(location)
-            scale = T.shape_padleft(scale)
-
-            patch = self.apply_inner(image, location, scale, a, b)
-
-            # return without batch axis
-            return patch[0]
-
-        patch, _ = theano.map(
-            map_fn,
-            sequences=[image, a, b, location, scale])
-
-        return patch
-
     @application(inputs="image image_shape location scale".split(),
                  outputs="patch savings".split())
     def apply(self, image, image_shape, location, scale):
@@ -92,7 +79,7 @@ class LocallySoftRectangularCropper(Brick):
 
         if self.batched_window:
             patch = self.apply_inner(image, location, scale, a[0], b[0])
-        else:
+        elif self.scan:
             def map_fn(image, a, b, location, scale):
                 # apply_inner expects a batch axis
                 image = T.shape_padleft(image)
@@ -104,15 +91,15 @@ class LocallySoftRectangularCropper(Brick):
                 # return without batch axis
                 return patch[0]
 
-            if self.batch_size_constant:
-                # avoid scan by constant batch size
-                patch = T.stack([
-                    map_fn(image[i], a[i], b[i], location[i], scale[i])
-                    for i in xrange(self.batch_size)])
-            else:
-                patch, _ = theano.map(
-                    map_fn,
-                    sequences=[image, a, b, location, scale])
+            patch, _ = theano.map(
+                map_fn,
+                sequences=[image, a, b, location, scale])
+        else:
+            patch = self.cropop(
+                image,
+                T.cast(a, theano.config.floatX),
+                T.cast(b, theano.config.floatX),
+                location, scale)
 
         savings = (1 - T.cast((b - a).prod(axis=1), floatX) / image_shape.prod(axis=1))
         return patch, savings
