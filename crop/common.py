@@ -56,17 +56,17 @@ def weightfunction(name, grad=False):
         // FIXME: rederive for bounded s
         dwds = w * ((iv - nv/2) * delta / sigma / sigma - s * (delta * delta / sigma / sigma - 1)) / s / s;
     """ if grad else ""
-    return Template("""__device__ void $name(
+    return Template("""
+    #define prior_sigma 0.5
+    // bound the influence of scale on sigma to avoid the kernels
+    // becoming too narrow when zooming in.
+    #define s_bound 1.
+    __device__ void $name(
             float &w, $grad_arguments
             const int nv, const int iv, const int iV,
             const float l, const float s) {
-        #define prior_sigma 0.5
-        const float delta = iV - (iv - nv/2) / s + l;
-        // bound the influence of scale on sigma to avoid the kernels
-        // becoming too narrow when zooming in.
-        #define s_bound = .9;
-        //const float sigma = prior_sigma / min(s, s_bound);
-        const float sigma = prior_sigma / s;
+        const float delta = (iv - nv/2) / s + l - iV;
+        const float sigma = prior_sigma / min(s, s_bound);
 
         w = exp(-0.5 * delta * delta / sigma / sigma) / sqrt(2*M_PI) / sigma;
         $grad_assignments

@@ -227,8 +227,8 @@ class TimCropperOp(GpuOp):
             """ % dict(i=2 + i, patch_dim=patch_dim))
         # compute input memory location
         strings.append("size_t x_index = i0 * x_strides[0] + i1 * x_strides[1] + %s;"
-                        % " + ".join("i%(i)sV * x_strides[%(i)s]"
-                                     % dict(i=2 + i) for i in range(ndim_spatial)))
+                       % " + ".join("i%(i)sV * x_strides[%(i)s]"
+                                    % dict(i=2 + i) for i in range(ndim_spatial)))
         strings.append("assert(x_index < x_size);")
 
         # compute contribution

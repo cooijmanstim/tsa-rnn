@@ -2,12 +2,11 @@ import math
 import numpy as np
 import theano
 import theano.tensor as T
+import util
 
 floatX = theano.config.floatX
 
 from blocks.bricks import Brick, application
-
-import util
 
 class LocallySoftRectangularCropper(Brick):
     def __init__(self, patch_shape, kernel, hyperparameters, **kwargs):
@@ -67,6 +66,24 @@ class LocallySoftRectangularCropper(Brick):
         b = T.cast(T.ceil(b), 'int16')
 
         return a, b
+
+    def apply_aaargh(self, image, location, scale, a, b):
+        def map_fn(image, a, b, location, scale):
+            # apply_inner expects a batch axis
+            image = T.shape_padleft(image)
+            location = T.shape_padleft(location)
+            scale = T.shape_padleft(scale)
+
+            patch = self.apply_inner(image, location, scale, a, b)
+
+            # return without batch axis
+            return patch[0]
+
+        patch, _ = theano.map(
+            map_fn,
+            sequences=[image, a, b, location, scale])
+
+        return patch
 
     @application(inputs="image image_shape location scale".split(),
                  outputs="patch savings".split())
