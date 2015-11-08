@@ -49,13 +49,15 @@ class RecurrentAttentionModel(object):
             output_dim=self.rnn.get_dim("inputs") + self.rnn.get_dim("gate_inputs"),
             use_bias=True,
             weights_init=initialization.Orthogonal(),
-            biases_init=initialization.Constant(1))
+            biases_init=initialization.Constant(0))
 
         self.children.extend([self.rnn, self.cropper, self.embedder])
 
     def initialize(self):
         for child in self.children:
             child.initialize()
+        for gru in self.rnn.transitions:
+            initialization.Identity().initialize(gru.state_to_state, gru.rng)
 
     @util.checkargs
     def construct_merger(self, n_spatial_dims, n_channels,
