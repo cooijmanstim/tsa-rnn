@@ -32,7 +32,6 @@ class TimCropperGradOp(GpuOp):
                             (a, 2), (b, 2), (l, 2), (s, 2)):
             if not input.type.ndim == ndim:
                 raise TypeError()
-        # NOTE: can handle discontiguous dCdy, x
         dCdy, x, a, b, l, s = tuple(map(gpu_contiguous, (dCdy, x, a, b, l, s)))
         inputs = list(map(as_cuda_ndarray_variable, (dCdy, x, a, b, l, s)))
 

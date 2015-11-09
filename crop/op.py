@@ -27,13 +27,12 @@ class TimCropperOp(GpuOp):
     def __str__(self):
         return '%s{%s}' % (self.__class__.__name__, self.patch_shape)
 
+    # NOTE: cast a, b to floatX just before making the node
     def make_node(self, x, a, b, l, s):
         for input, ndim in ((x, 2 + len(self.patch_shape)),
                             (a, 2), (b, 2), (l, 2), (s, 2)):
             if not input.type.ndim == ndim:
                 raise TypeError()
-        # NOTE: cast a, b to floatX just before making the node
-        # NOTE: can handle discontiguous x
         x, a, b, l, s = tuple(map(gpu_contiguous, (x, a, b, l, s)))
         inputs = list(map(as_cuda_ndarray_variable, (x, a, b, l, s)))
         return Apply(self, inputs, [inputs[0].type()])
@@ -126,20 +125,23 @@ class TimCropperOp(GpuOp):
         }
         """)
 
+        # due to separability we need to compute weights only for patch
+        # row/image row and patch col/image col pairs, instead of for
+        # the full cartesian product of patch pixel/image pixel pairs.
+        # we precompute the weights in a separate pass.
+        weightpass_call = common.weightpass_call(
+            nodename, patch_shape=self.patch_shape, V=x, l=l, s=s, fail=fail, grad=False)
+
         # launch kernel
-        arguments = []
-        for var in "x y".split():
-            arguments.append("CudaNdarray_SIZE($%s)" % var)
-            arguments.append("CudaNdarray_DEV_DATA($%s)" % var)
-            arguments.append("CudaNdarray_DEV_DIMS($%s)" % var)
-            arguments.append("CudaNdarray_DEV_STRIDES($%s)" % var)
-        arguments.extend("CudaNdarray_DEV_DATA($%s)" % var for var in "abls")
+        W = "W" # so call_arguments knows its name
+        arguments = common.call_arguments("x y W".split())
         gridblock = common.gridblock(ndim_spatial, "ydims")
         strings.append("""
         {
-            printf("enter op\\n");
+            $weightpass_call
+
             $gridblock
-            $function_name<<<grid, block>>>(""" + ", \n".join(arguments) + """)
+            $function_name<<<grid, block>>>(""" + arguments + """)
             CNDA_THREAD_SYNC;
             cudaError_t err = cudaGetLastError();
             if( cudaSuccess != err)
@@ -153,7 +155,10 @@ class TimCropperOp(GpuOp):
                     block.x, block.y, block.z);
                 $fail;
             }
-            printf("exit op\\n");
+
+            // free weight storage
+            Py_XDECREF(W);
+            W = NULL;
         }""")
 
         from string import Template
@@ -161,81 +166,63 @@ class TimCropperOp(GpuOp):
 
     def c_support_code_apply(self, node, nodename):
         function_name = "TimCropper_%s" % nodename
-        weight_function_name = "%s_weight" % function_name
 
         ndim_spatial = len(self.patch_shape)
         ndim_total = 2 + ndim_spatial
         import math
         sqrt2pi = math.sqrt(2*math.pi)
 
+        arguments = common.defn_arguments("x y W".split())
+        threadindex = common.threadindex(ndim_spatial, "y_dims")
+        weightpass_defn = common.weightpass_defn(nodename, self.patch_shape, grad=False)
+
         strings = []
         strings.append("""
         #include <stdio.h>
-        """)
-        strings.append(common.weightfunction(
-            name=weight_function_name, grad=False))
+        #include <sys/time.h>
 
-        arguments = []
-        for var in "x y".split():
-            arguments.append("const size_t %s_size" % var)
-            arguments.append("%sfloat* %s" % ("const " if var == "x" else "", var))
-            arguments.append("const int* %s_dims" % var)
-            arguments.append("const int* %s_strides" % var)
-        # a, b, l, s are contiguous
-        arguments.extend("const float* %s" % var for var in "abls")
-        arguments = ", \n".join(arguments)
+        $weightpass_defn
 
-        threadindex = common.threadindex(ndim_spatial, "y_dims")
-
-        strings.append("""
         __global__ void $function_name($arguments) {
             $threadindex
         """)
-        # compute output memory locations and initialize to zero
-        strings.append("size_t y_index = i0 * y_strides[0] + i1 * y_strides[1] + %s;"
-                       % " + ".join("i%(i)sv * y_strides[%(i)s]"
-                                    % dict(i=2 + i) for i in range(ndim_spatial)))
-        strings.append("assert(y_index < y_size);")
-#        strings.append("""
-#            printf("block %3i %3i %3i thread %3i %3i %3i pixel %3i %3i %3i %3i y_index %3i y_strides %3i %3i %3i %3i\\n",
-#                   blockIdx.x, blockIdx.y, blockIdx.z,
-#                   threadIdx.x, threadIdx.y, threadIdx.z,
-#                   i0, i1, i2v, i3v, y_index,
-#                   y_strides[0],
-#                   y_strides[1],
-#                   y_strides[2],
-#                   y_strides[3]
-#                   );
-#        """)
-        strings.append("y[y_index] = 0.0f;")
 
         for i in range(ndim_spatial):
             strings.append("""
             int a%(i2)s = a[i0 * $ndim_spatial + %(i)s],
                 b%(i2)s = b[i0 * $ndim_spatial + %(i)s];
-            float l%(i2)s = l[i0 * $ndim_spatial + %(i)s],
-                  s%(i2)s = s[i0 * $ndim_spatial + %(i)s];
             assert(0 <= a%(i2)s); assert(a%(i2)s <= b%(i2)s); assert(b%(i2)s <= x_dims[%(i2)s]);
-            float w%(i2)s = 0;
             """ % dict(i=i, i2=2 + i))
 
         # loop over input pixel indices i{2, 3, ...}V
+        # compute start of input memory
+        # NOTE: assumes x, W contiguous
+        # FIXME: the a, b windows are not contiguous, so this is all wrong. must adjust for a, b in both x and W indices
+        strings.append("const float* x_pointer = x + i0 * x_strides[0] + i1 * x_strides[1];")
+        strings.append("const float* W_pointer = W + i0 * W_strides[0] + i1 * W_strides[1];")
+        strings.append("float result = 0.0f;")
+
         for i, patch_dim in enumerate(self.patch_shape):
             strings.append("""
+            x_pointer += a%(i)s;
             for (int i%(i)sV = a%(i)s; i%(i)sV < b%(i)s; ++i%(i)sV) {
-                $weight_function_name(w%(i)s, %(patch_dim)s, i%(i)sv, i%(i)sV, l%(i)s, s%(i)s);
             """ % dict(i=2 + i, patch_dim=patch_dim))
-        # compute input memory location
-        strings.append("size_t x_index = i0 * x_strides[0] + i1 * x_strides[1] + %s;"
-                       % " + ".join("i%(i)sV * x_strides[%(i)s]"
+
+        weight = " * ".join("*(W + %i)" % j for j in range(ndim_spatial))
+        strings.append("result += $weight * (*x_pointer);")
+
+        strings.append("++x_pointer;")
+        strings.append("W_pointer += $ndim_spatial;")
+
+        strings.extend("}" * ndim_spatial)
+
+        # store result at output memory location
+        strings.append("size_t y_index = i0 * y_strides[0] + i1 * y_strides[1] + %s;"
+                       % " + ".join("i%(i)sv * y_strides[%(i)s]"
                                     % dict(i=2 + i) for i in range(ndim_spatial)))
-        strings.append("assert(x_index < x_size);")
+        strings.append("assert(y_index < y_size);")
+        strings.append("y[y_index] = result;")
 
-        # compute contribution
-        weight = " * ".join("w%i" % (2 + i) for i in range(ndim_spatial))
-        strings.append("y[y_index] += %s * x[x_index];" % weight)
-
-        strings.extend("}" * (ndim_spatial + 1))
-
+        strings.append("}")
         from string import Template
         return Template("\n".join(strings)).substitute(locals())
