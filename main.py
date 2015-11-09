@@ -36,6 +36,7 @@ def construct_monitors(algorithm, task, model, graphs, outputs,
         step_channels.extend([
             algorithm.steps[param].norm(2).copy(name="step_norm:%s" % name)
             for name, param in model.get_parameter_dict().items()])
+        step_channels.append(algorithm.total_step_norm.copy(name="total_step_norm"))
         step_channels.append(algorithm.total_gradient_norm.copy(name="total_gradient_norm"))
         logger.warning("constructing training data monitor")
         extensions.append(TrainingDataMonitoring(
@@ -80,8 +81,6 @@ def construct_monitors(algorithm, task, model, graphs, outputs,
                     for i, var in enumerate(vars):
                         channels.append(var.mean().copy(
                             name="activation[%i].mean:%s" % (i, path)))
-
-            channels.append(algorithm.total_gradient_norm.copy(name="total_gradient_norm"))
 
         if "batch_normalization" in monitor_options:
             errors = []

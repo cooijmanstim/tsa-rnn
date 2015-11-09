@@ -5,6 +5,7 @@ import conv3d
 
 logger = logging.getLogger(__name__)
 
+@util.checkargs
 def construct_cnn_layer(name, layer_spec, conv_module, ndim, batch_normalize):
     if "type" in layer_spec:
         raise ValueError("conv layer spec error: `pool` is part of `conv` now"
@@ -36,6 +37,7 @@ def construct_cnn_layer(name, layer_spec, conv_module, ndim, batch_normalize):
                     % " ".join(layer_spec.keys()))
     return layer
 
+@util.checkargs
 def construct_cnn(name, layer_specs, n_channels, input_shape, batch_normalize):
     ndim = len(input_shape)
     conv_module = {
@@ -67,6 +69,7 @@ def construct_cnn(name, layer_specs, n_channels, input_shape, batch_normalize):
     cnn.initialize()
     return cnn
 
+@util.checkargs
 def construct_mlp(name, hidden_dims, input_dim, batch_normalize,
                   activations=None, weights_init=None, biases_init=None):
     if not hidden_dims:

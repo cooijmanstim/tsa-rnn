@@ -23,7 +23,7 @@ class PrintingTo(Printing):
 
 class DumpGraph(SimpleExtension):
     def __init__(self, path, **kwargs):
-        kwargs["after_epoch"] = True
+        kwargs["after_batch"] = True
         super(DumpGraph, self).__init__(**kwargs)
         self.path = path
 
