@@ -58,18 +58,6 @@ class LocallySoftRectangularCropper(Brick):
         a = T.clip(a, 0,     image_shape - 1)
         b = T.clip(b, a + 1, image_shape)
 
-        if self.batched_window:
-            # take the bounding box of all windows; now the slices
-            # will have the same length for each sample and scan can
-            # be avoided.  comes at the cost of typically selecting
-            # more of the input.
-            a = a.min(axis=0, keepdims=True)
-            b = b.max(axis=0, keepdims=True)
-
-        # make integer
-        a = T.cast(T.floor(a), 'int16')
-        b = T.cast(T.ceil(b), 'int16')
-
         return a, b
 
     @application(inputs="image image_shape location scale".split(),
@@ -77,29 +65,37 @@ class LocallySoftRectangularCropper(Brick):
     def apply(self, image, image_shape, location, scale):
         a, b = self.compute_hard_windows(image_shape, location, scale)
 
-        if self.batched_window:
-            patch = self.apply_inner(image, location, scale, a[0], b[0])
-        elif self.scan:
-            def map_fn(image, a, b, location, scale):
-                # apply_inner expects a batch axis
-                image = T.shape_padleft(image)
-                location = T.shape_padleft(location)
-                scale = T.shape_padleft(scale)
-
-                patch = self.apply_inner(image, location, scale, a, b)
-
-                # return without batch axis
-                return patch[0]
-
-            patch, _ = theano.map(
-                map_fn,
-                sequences=[image, a, b, location, scale])
+        if hasattr(self, "cropop"):
+            patch = self.cropop(image, a, b, location, scale)
         else:
-            patch = self.cropop(
-                image,
-                T.cast(a, theano.config.floatX),
-                T.cast(b, theano.config.floatX),
-                location, scale)
+            # make integer
+            a = T.cast(T.floor(a), 'int16')
+            b = T.cast(T.ceil(b), 'int16')
+
+            if self.batched_window:
+                # take the bounding box of all windows; now the slices
+                # will have the same length for each sample and scan can
+                # be avoided.  comes at the cost of typically selecting
+                # more of the input.
+                a = a.min(axis=0, keepdims=True)
+                b = b.max(axis=0, keepdims=True)
+
+                patch = self.apply_inner(image, location, scale, a[0], b[0])
+            elif self.scan:
+                def map_fn(image, a, b, location, scale):
+                    # apply_inner expects a batch axis
+                    image = T.shape_padleft(image)
+                    location = T.shape_padleft(location)
+                    scale = T.shape_padleft(scale)
+
+                    patch = self.apply_inner(image, location, scale, a, b)
+
+                    # return without batch axis
+                    return patch[0]
+
+                patch, _ = theano.map(
+                    map_fn,
+                    sequences=[image, a, b, location, scale])
 
         savings = (1 - T.cast((b - a).prod(axis=1), floatX) / image_shape.prod(axis=1))
         return patch, savings
@@ -132,7 +128,7 @@ class Gaussian(object):
         # black.
         # let's not let this happen; put a lower bound on sigma.
         yuck = scale > 1.0
-        scale = (1 - yuck)*scale + yuck*1.0
+        scale = (1. - yuck)*scale + yuck*1.0
         sigma = 0.5 / scale
         return sigma
 

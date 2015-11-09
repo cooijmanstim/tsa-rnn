@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import operator, logging
+import operator, logging, collections
 from collections import OrderedDict
 
 import numpy
@@ -24,6 +24,7 @@ class NormalizedActivation(bricks.Initializable, bricks.Feedforward):
         self.shape = shape
         self.broadcastable = broadcastable
         self.activation = activation or bricks.Rectifier()
+        # batch_normalize may be a bool or a dict of kwargs to the BatchNormalization constructor
         self.batch_normalize = batch_normalize
 
     @property
@@ -39,7 +40,10 @@ class NormalizedActivation(bricks.Initializable, bricks.Feedforward):
                      broadcastable=self.broadcastable)
         self.sequence = []
         if self.batch_normalize:
-            self.sequence.append(BatchNormalization(**arghs))
+            aarghs = dict(arghs)
+            if isinstance(self.batch_normalize, collections.Mapping):
+                aarghs.update(self.batch_normalize)
+            self.sequence.append(BatchNormalization(**aarghs))
         else:
             self.sequence.append(SharedShift(
                 biases_init=initialization.Constant(0),
@@ -165,11 +169,11 @@ class BatchNormalization(bricks.Initializable, bricks.Feedforward):
         mean=BatchMeanRole(),
         var=BatchVarRole())
 
-    def __init__(self, shape, broadcastable, alpha=1e-2, **kwargs):
+    def __init__(self, shape, broadcastable, epsilon=1e-2, **kwargs):
         super(BatchNormalization, self).__init__(**kwargs)
         self.shape = shape
         self.broadcastable = list(broadcastable)
-        self.alpha = alpha
+        self.epsilon = epsilon
 
     def _allocate(self):
         parameter_shape = [1] + [1 if broadcast else dim for dim, broadcast
@@ -249,8 +253,8 @@ class BatchNormalization(bricks.Initializable, bricks.Feedforward):
                                    % (util.get_path(population_stat), batch_stats))
                 batch_stat = T.stack(batch_stats).mean(axis=0)
                 updates.append((population_stat,
-                                (1 - brick.alpha) * population_stat
-                                + brick.alpha * batch_stat))
+                                (1 - brick.epsilon) * population_stat
+                                + brick.epsilon * batch_stat))
         return updates
 
 from theano import tensor
