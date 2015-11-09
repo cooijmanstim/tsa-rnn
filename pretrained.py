@@ -1,3 +1,5 @@
+import theano
+import theano.tensor as T
 from blocks.bricks.base import Brick, application
 from sklearn_theano.feature_extraction.caffe.vgg_flows import create_theano_expressions
 import util
@@ -10,6 +12,14 @@ class PatchTransform(Brick):
     @application(inputs=["patch"], outputs=["output"])
     def apply(self, patch):
         if len(self.patch_shape) == 3:
+            # swap rgb
+            patch = patch[:, [2, 1, 0], :, :, :]
+            # map to [0, 255]
+            patch *= 255
+            # subtract pixelwise mean
+            patch -= (T.constant([104, 117, 123], dtype=theano.config.floatX)
+                       .dimshuffle("x", 0, "x", "x", "x"))
+
             output = create_theano_expressions(
                 mode="rgb",
                 inputs=("data",
@@ -18,7 +28,8 @@ class PatchTransform(Brick):
                          .reshape((patch.shape[0] * patch.shape[2],
                                    patch.shape[1],
                                    patch.shape[3],
-                                   patch.shape[4])))))[0]["fc7"]
+                                   patch.shape[4]))))
+                )[0]["fc7"]
             return (output
                     .reshape((patch.shape[0], patch.shape[2], -1))
                     # average across frames

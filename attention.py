@@ -70,6 +70,7 @@ class RecurrentAttentionModel(object):
         if patch_cnn_spec == "pretrained":
             import pretrained
             patch_transforms.append(pretrained.get_patch_transform(**hyperparameters))
+            shape = patch_transforms[-1].get_dim("output")
         elif patch_cnn_spec:
             patch_transforms.append(masonry.construct_cnn(
                 name="patch_cnn",
