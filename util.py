@@ -15,24 +15,6 @@ from blocks.filter import VariableFilter
 
 logger = logging.getLogger(__name__)
 
-def broadcast_index(index, axes, ndim):
-    dimshuffle_args = ['x'] * ndim
-    if isinstance(axes, numbers.Integral):
-        axes = [axes]
-    for i, axis in enumerate(axes):
-        dimshuffle_args[axis] = i
-    return index.dimshuffle(*dimshuffle_args)
-
-def broadcast_indices(index_specs, ndim):
-    indices = []
-    for index, axes in index_specs:
-        indices.append(broadcast_index(index, axes, ndim))
-    return indices
-
-def subtensor(x, index_specs):
-    indices = broadcast_indices(index_specs, x.ndim)
-    return x[tuple(indices)]
-
 # from http://stackoverflow.com/a/16571630
 class StdoutLines(list):
     def __enter__(self):
