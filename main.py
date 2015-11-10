@@ -13,7 +13,7 @@ floatX = theano.config.floatX
 
 @util.checkargs
 def construct_model(patch_shape, hidden_dim, hyperparameters, **kwargs):
-    cropper = crop.LocallySoftRectangularCropper(
+    cropper = crop.Cropper(
         name="cropper", kernel=crop.Gaussian(),
         patch_shape=patch_shape, hyperparameters=hyperparameters)
     return attention.RecurrentAttentionModel(

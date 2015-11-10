@@ -11,9 +11,9 @@ from blocks.bricks import Brick, application
 
 from op import TimCropperOp
 
-class LocallySoftRectangularCropper(Brick):
+class Cropper(Brick):
     def __init__(self, patch_shape, kernel, hyperparameters, **kwargs):
-        super(LocallySoftRectangularCropper, self).__init__(**kwargs)
+        super(Cropper, self).__init__(**kwargs)
         self.patch_shape = patch_shape
         self.kernel = kernel
         self.cutoff = hyperparameters["cutoff"]

@@ -1,4 +1,4 @@
 from op import TimCropperOp
 from grad import TimCropperGradOp
 
-from oldcropper import LocallySoftRectangularCropper, Gaussian
+from brick import Cropper, Gaussian

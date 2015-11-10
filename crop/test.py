@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 
 from op import TimCropperOp
 from grad import TimCropperGradOp
-from oldcropper import LocallySoftRectangularCropper, Gaussian
+from oldcropper import Cropper, Gaussian
 
 def load_frame(bytes):
     image = Image.open(StringIO(bytes.tostring()))
@@ -41,10 +41,10 @@ if __name__ == "__main__":
     patch_shape = (32, 32)
     ndim_spatial = len(patch_shape)
     crop = TimCropperOp(patch_shape)
-    oldcropper = LocallySoftRectangularCropper(
+    oldcropper = Cropper(
         patch_shape, Gaussian(),
         dict(cutoff=3, batched_window=True, scan=False))
-    newcropper = LocallySoftRectangularCropper(
+    newcropper = Cropper(
         patch_shape, Gaussian(),
         dict(cutoff=3, batched_window=False, scan=False))
 
