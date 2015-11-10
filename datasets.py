@@ -4,6 +4,14 @@ from StringIO import StringIO
 from PIL import Image
 import fuel.datasets
 
+import operator, functools
+
+np_float32 = np.float32
+nparray_from_image = functools.partial(np.array, dtype=np_float32)
+image_open = Image.open
+tostring = operator.methodcaller("tostring")
+asarray = np.asarray
+
 class FramewiseCompressedVideoDataset(fuel.datasets.H5PYDataset):
     def __init__(self, path, which_set):
         file = h5py.File(path, "r")
@@ -22,16 +30,15 @@ class FramewiseCompressedVideoDataset(fuel.datasets.H5PYDataset):
         return videos, targets
 
     def video_from_frames(self, video_range):
-        frames = self.frames[video_range[0]:video_range[1]]
-        video = np.array(map(self.load_frame, frames))
-        return video
-
-    def load_frame(self, bytes):
-        image = Image.open(StringIO(bytes.tostring()))
-        image = (np.array(image.getdata(), dtype=np.float32)
-                 .reshape((image.size[1], image.size[0])))
-        image /= 255.0
-        return image
+        # we need to do a bunch of things to each frame;
+        # try to avoid python overhead by using builtins
+        return asarray(
+            map(nparray_from_image,
+                map(image_open,
+                    map(StringIO,
+                        map(tostring,
+                            self.frames[video_range[0]:video_range[1]])))),
+            dtype=np_float32) / 255.0
 
 class JpegVideoDataset(FramewiseCompressedVideoDataset):
     pass
