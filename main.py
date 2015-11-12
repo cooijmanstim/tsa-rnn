@@ -64,7 +64,7 @@ def construct_monitors(algorithm, task, model, graphs, outputs,
                         .mean().copy(name="mean_savings"))
 
         if "theta" in monitor_options:
-            for key in "raw_location raw_scale".split():
+            for key in "true_scale raw_location raw_scale".split():
                 for stat in "mean var".split():
                     channels.append(getattr(outputs[which_set][key], stat)(axis=1)
                                     .copy(name="%s.%s" % (key, stat)))
@@ -196,7 +196,7 @@ def construct_graphs(task, n_patches, hyperparameters, **kwargs):
         outputs_by_name[key] = locals()[key]
     for key in task.monitor_outputs():
         outputs_by_name[key] = emitter_outputs[key]
-    for key in "raw_location raw_scale patch savings".split():
+    for key in "true_location true_scale raw_location raw_scale patch savings".split():
         outputs_by_name[key] = T.stack([scope[key] for scope in scopes])
     outputs = list(outputs_by_name.values())
 
@@ -239,7 +239,6 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
     extensions = []
 
     # let theta noise decay as training progresses
-    from blocks.extensions.training import SharedVariableModifier
     for key in "location_std scale_std".split():
         hyperparameters[key] = theano.shared(hyperparameters[key], name=key)
         extensions.append(util.ExponentialDecay(
@@ -255,7 +254,7 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
     from blocks.model import Model
     model = Model(outputs["train"]["cost"])
 
-    from blocks.algorithms import GradientDescent, CompositeRule, StepClipping, Adam
+    from blocks.algorithms import GradientDescent, CompositeRule, StepClipping, Adam, RMSProp
     algorithm = GradientDescent(
         cost=outputs["train"]["cost"],
         parameters=graphs["train"].parameters,
@@ -278,8 +277,7 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
         DumpBest("best_valid_error_rate", name+"_best.zip"),
         Checkpoint(hyperparameters["checkpoint_save_path"],
                    on_interrupt=False, every_n_epochs=5,
-                   before_training=True, use_cpickle=True,
-                   save_separately=["log"]),
+                   use_cpickle=True, save_separately=["log"]),
         ProgressBar(),
         Timing(),
         Printing(), PrintingTo(name+"_log"),

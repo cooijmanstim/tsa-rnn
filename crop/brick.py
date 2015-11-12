@@ -21,6 +21,7 @@ class Cropper(Brick):
         self.scan = hyperparameters["scan"]
         if not self.batched_window and not self.scan:
             logger.warning("using experimental cropper op")
+            assert False # it's b0rken
             self.cropop = TimCropperOp(patch_shape)
         self.n_spatial_dims = len(patch_shape)
 
