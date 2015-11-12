@@ -66,8 +66,13 @@ class RecurrentAttentionModel(object):
                          patch_shape, patch_cnn_spec, patch_mlp_spec,
                          merge_mlp_spec, response_mlp_spec,
                          batch_normalize, batch_normalize_patch,
+                         task_name,
                          hyperparameters, **kwargs):
         # construct patch interpretation network
+        if task_name == "featurelevel_ucf101":
+            n_channels = 512 + 4096
+            assert patch_shape[1:] == [1, 1]
+            patch_shape = (patch_shape[0], 1)
         patch_transforms = []
         if patch_cnn_spec == "pretrained":
             import pretrained
@@ -81,8 +86,6 @@ class RecurrentAttentionModel(object):
                 n_channels=n_channels,
                 batch_normalize=batch_normalize_patch))
             shape = patch_transforms[-1].get_dim("output")
-        else:
-            shape = (n_channels,) + tuple(patch_shape)
         patch_transforms.append(bricks.FeedforwardFlattener(input_shape=shape))
         if patch_mlp_spec:
             patch_transforms.append(masonry.construct_mlp(
@@ -150,7 +153,11 @@ class RecurrentAttentionModel(object):
 
     def apply(self, scope, initial=False):
         if initial:
-            batch_size = scope.x_shape.shape[0]
+            if isinstance(scope.x_shape, tuple):
+                # for featurelevel_UCF101
+                batch_size = scope.x_shape[0].shape[0]
+            else:
+                batch_size = scope.x_shape.shape[0]
             # condition on initial shrink-to-fit patch
             scope.raw_location = T.alloc(T.cast(0.0, floatX),
                                          batch_size, self.cropper.n_spatial_dims)
@@ -197,6 +204,9 @@ class RecurrentAttentionModel(object):
     def map_to_input_space(self, scope):
         patch_shape = T.cast(self.cropper.patch_shape, floatX)
         image_shape = scope.x_shape
+        if isinstance(image_shape, tuple):
+            # for featurelevel_UCF101
+            image_shape = image_shape[1][:, 1:]
         scope.true_location, scope.true_scale = static_map_to_input_space(
             scope.raw_location, scope.raw_scale,
             patch_shape, image_shape)

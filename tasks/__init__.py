@@ -5,6 +5,7 @@ import old_cmv
 import cmv
 import kth
 import ucf101
+import featurelevel_ucf101
 import svhn
 import goodfellow_svhn
 
@@ -14,6 +15,7 @@ def get_task(task_name, hyperparameters, **kwargs):
                  cmv=cmv.Task,
                  kth=kth.Task,
                  ucf101=ucf101.Task,
+                 featurelevel_ucf101=featurelevel_ucf101.Task,
                  svhn_digit=svhn.DigitTask,
                  svhn_number=goodfellow_svhn.NumberTask)[task_name]
     return klass(**hyperparameters)
