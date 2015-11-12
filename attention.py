@@ -9,17 +9,19 @@ logger = logging.getLogger(__name__)
 floatX = theano.config.floatX
 
 # this belongs on RecurrentAttentionModel as a static method, but that breaks pickling
-def static_map_to_input_space(location, scale, patch_shape, image_shape):
+def static_map_to_input_space(location, scale, patch_shape, image_shape, max_coverage=1.):
     # linearly map locations from (-1, 1) to image index space
     location = (location + 1) / 2 * image_shape
     # disallow negative scale
-    scale *= scale > 0
+    exp = np.exp if isinstance(scale, np.ndarray) else T.exp
+    scale = exp(scale)
     # translate scale such that scale = 0 corresponds to shrinking the
     # full image to fit into the patch, and the model can only zoom in
     # beyond that.  i.e. by default the model looks at a very coarse
     # version of the image, and can choose to selectively refine
     # regions
-    scale += patch_shape / image_shape
+    prior_scale = patch_shape / image_shape / max_coverage
+    scale *= prior_scale
     return location, scale
 
 class RecurrentAttentionModel(object):
