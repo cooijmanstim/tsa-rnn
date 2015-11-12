@@ -169,10 +169,11 @@ class BatchNormalization(bricks.Initializable, bricks.Feedforward):
         mean=BatchMeanRole(),
         var=BatchVarRole())
 
-    def __init__(self, shape, broadcastable, epsilon=1e-2, **kwargs):
+    def __init__(self, shape, broadcastable, alpha=1e-2, epsilon=1e-8, **kwargs):
         super(BatchNormalization, self).__init__(**kwargs)
         self.shape = shape
         self.broadcastable = list(broadcastable)
+        self.alpha = alpha
         self.epsilon = epsilon
 
     def _allocate(self):
@@ -225,7 +226,7 @@ class BatchNormalization(bricks.Initializable, bricks.Feedforward):
         return theano.tensor.nnet.bn.batch_normalization(
             inputs=input_, gamma=gamma, beta=beta,
             mean=self.batch_stats["mean"],
-            std=T.sqrt(self.batch_stats["var"] + 1e-8))
+            std=T.sqrt(self.batch_stats["var"] + self.epsilon))
 
     @staticmethod
     def get_updates(variables):
@@ -253,8 +254,8 @@ class BatchNormalization(bricks.Initializable, bricks.Feedforward):
                                    % (util.get_path(population_stat), batch_stats))
                 batch_stat = T.stack(batch_stats).mean(axis=0)
                 updates.append((population_stat,
-                                (1 - brick.epsilon) * population_stat
-                                + brick.epsilon * batch_stat))
+                                (1 - brick.alpha) * population_stat
+                                + brick.alpha * batch_stat))
         return updates
 
 from theano import tensor
