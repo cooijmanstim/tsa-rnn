@@ -105,21 +105,21 @@ def prepare_mode(mode, outputs, emitter, hyperparameters, **kwargs):
         hyperparameters["rng"] = util.get_rng(seed=1)
         emitter.tag_dropout(outputs, **hyperparameters)
         tag_convnet_dropout(outputs, **hyperparameters)
-        logger.warning("%i variables in %s graph" % (util.graph_size(outputs), mode))
+        logger.warning("%i variables in %s graph" % (graph.graph_size(outputs), mode))
         outputs = graph.apply_transforms(outputs, reason="regularization",
                                          hyperparameters=hyperparameters)
-        logger.warning("%i variables in %s graph" % (util.graph_size(outputs), mode))
+        logger.warning("%i variables in %s graph" % (graph.graph_size(outputs), mode))
 
         updates = bricks.BatchNormalization.get_updates(outputs)
         print "batch normalization updates:", updates
 
         return outputs, updates
     elif mode == "inference":
-        logger.warning("%i variables in %s graph" % (util.graph_size(outputs), mode))
+        logger.warning("%i variables in %s graph" % (graph.graph_size(outputs), mode))
         outputs = graph.apply_transforms(
             outputs, reason="population_normalization",
             hyperparameters=hyperparameters)
-        logger.warning("%i variables in %s graph" % (util.graph_size(outputs), mode))
+        logger.warning("%i variables in %s graph" % (graph.graph_size(outputs), mode))
         return outputs, []
 
 @util.checkargs
