@@ -26,6 +26,8 @@ class FeaturelevelUCF101Dataset(fuel.datasets.H5PYDataset):
         # flatten the degenerate spatial dimensions on the fc features
         sources[0] = [np.reshape(x, (x.shape[0], -1))
                       for x in sources[0]]
+        # so targets are 1-based -_-
+        sources[2] -= 1
         return sources
 
 def _canonicalize(self, data):
