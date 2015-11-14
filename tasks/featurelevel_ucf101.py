@@ -9,6 +9,16 @@ import transformers
 
 logger = logging.getLogger(__name__)
 
+max_duration = 100
+def bound_duration(sources):
+    duration = sources[0].shape[1]
+    if duration > max_duration:
+        sources = list(sources)
+        offset = np.random.randint(0, duration - max_duration)
+        for i, source in enumerate(sources):
+            sources[i] = source[:, offset:(offset + max_duration), ...]
+    return sources
+
 class FeaturelevelUCF101Dataset(fuel.datasets.H5PYDataset):
     def __init__(self, *args, **kwargs):
         kwargs.setdefault("load_in_memory", True)
@@ -21,6 +31,7 @@ class FeaturelevelUCF101Dataset(fuel.datasets.H5PYDataset):
             sources[i] = list(map(cPickle.load, map(StringIO, map(zlib.decompress, sources[i]))))
             # move channel axis before time axis
             sources[i] = [np.rollaxis(x, 1, 0) for x in sources[i]]
+        sources[:2] = list(zip(*list(map(bound_duration, zip(*sources[:2])))))
         # so i accidentally mixed up the two when generating the dataset
         sources[0], sources[1] = sources[1], sources[0]
         # flatten the degenerate spatial dimensions on the fc features
@@ -60,7 +71,7 @@ class Task(tasks.Classification):
 
         targets = T.ivector("targets")
 
-        test_batch = self.get_stream("valid").get_epoch_iterator(as_dict=True).next()
+        test_batch = self.get_stream("train").get_epoch_iterator(as_dict=True).next()
         for key, value in test_batch.items():
             locals()[key].tag.test_value = value[:11]
 
@@ -72,8 +83,7 @@ class Task(tasks.Classification):
 
     def load_datasets(self):
         return dict(
-            train=FeaturelevelUCF101Dataset(which_sets=["train"], subset=slice(None, 8000)),
-            valid=FeaturelevelUCF101Dataset(which_sets=["train"], subset=slice(8000, None)),
+            train=FeaturelevelUCF101Dataset(which_sets=["train"]),
             test= FeaturelevelUCF101Dataset(which_sets=["test"]))
 
     def get_stream_num_examples(self, which_set, monitor):

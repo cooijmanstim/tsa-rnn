@@ -15,7 +15,7 @@ floatX = theano.config.floatX
 
 class UCF101Cropper(object):
     def __init__(self, patch_shape, kernel, hyperparameters):
-        self.cropper1d = Cropper(patch_shape[:1], kernel, hyperparameters, name="cropper1d")
+        self.cropper1d = Cropper((1,), kernel, hyperparameters, name="cropper1d")
         self.cropper3d = Cropper(patch_shape    , kernel, hyperparameters, name="cropper3d")
         self.patch_shape = patch_shape
         self.n_spatial_dims = len(patch_shape)
@@ -83,7 +83,7 @@ def construct_monitors(algorithm, task, model, graphs, outputs,
         extensions.append(DataStreamMonitoring(
             data_independent_channels, data_stream=None, after_epoch=True))
 
-    for which_set in "train valid test".split():
+    for which_set in "train test".split():
         channels = []
         channels.extend(outputs[which_set][key] for key in
                         "cost emitter_cost excursion_cost".split())
@@ -196,7 +196,6 @@ def construct_graphs(task, n_patches, hyperparameters, **kwargs):
     # construct training and inference graphs
     mode_by_set = OrderedDict([
         ("train", "training"),
-        ("valid", "inference"),
         ("test", "inference")])
     outputs_by_mode, updates_by_mode = OrderedDict(), OrderedDict()
     for mode in "training inference".split():
@@ -265,10 +264,7 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
     from blocks.extensions.saveload import Checkpoint
     from dump import DumpBest, LightCheckpoint, PrintingTo, DumpGraph
     extensions.extend([
-        TrackTheBest("valid_error_rate", "best_valid_error_rate"),
-        FinishIfNoImprovementAfter("best_valid_error_rate", epochs=patience_epochs),
         FinishAfter(after_n_epochs=max_epochs),
-        DumpBest("best_valid_error_rate", name+"_best.zip"),
         Checkpoint(hyperparameters["checkpoint_save_path"],
                    on_interrupt=False, every_n_epochs=5,
                    use_cpickle=True, save_separately=["log"]),
