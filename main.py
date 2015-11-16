@@ -39,6 +39,17 @@ def construct_monitors(algorithm, task, model, graphs, outputs,
         step_channels.append(algorithm.total_step_norm.copy(name="total_step_norm"))
         step_channels.append(algorithm.total_gradient_norm.copy(name="total_gradient_norm"))
 
+        from extensions import Compressor
+        for step_rule in algorithm.step_rule.components:
+            if isinstance(step_rule, Compressor):
+                step_channels.append(step_rule.norm.copy(name="compressor.norm"))
+                step_channels.append(step_rule.newnorm.copy(name="compressor.newnorm"))
+                step_channels.append(step_rule.median.copy(name="compressor.median"))
+                step_channels.append(step_rule.ratio.copy(name="compressor.ratio"))
+
+        step_channels.extend(outputs["train"][key] for key in
+                             "cost emitter_cost excursion_cost cross_entropy error_rate".split())
+
         step_channels.extend(util.uniqueify_names_last_resort(util.dedup(
             (var.mean().copy(name="bn_stat:%s" % util.get_path(var))
              for var in graph.deep_ancestors([outputs["train"]["cost"]])
@@ -238,7 +249,7 @@ def construct_graphs(task, n_patches, hyperparameters, **kwargs):
 @util.checkargs
 def construct_main_loop(name, task_name, patch_shape, batch_size,
                         n_spatial_dims, n_patches, max_epochs,
-                        patience_epochs, learning_rate,
+                        patience_epochs, learning_rate, gradient_limiter,
                         hyperparameters, **kwargs):
     task = tasks.get_task(**hyperparameters)
     hyperparameters["n_channels"] = task.n_channels
@@ -262,10 +273,18 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
     model = Model(outputs["train"]["cost"])
 
     from blocks.algorithms import GradientDescent, CompositeRule, StepClipping, Adam, RMSProp
+    from extensions import Compressor
+    if gradient_limiter == "clip":
+        limiter = StepClipping(1.)
+    elif gradient_limiter == "compress":
+        limiter = Compressor()
+    else:
+        raise ValueError()
+
     algorithm = GradientDescent(
         cost=outputs["train"]["cost"],
         parameters=graphs["train"].parameters,
-        step_rule=CompositeRule([StepClipping(1.), Adam(learning_rate=learning_rate)]))
+        step_rule=CompositeRule([limiter, Adam(learning_rate=learning_rate)]))
     algorithm.add_updates(updates["train"])
 
     extensions.extend(construct_monitors(
