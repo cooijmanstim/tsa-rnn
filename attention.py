@@ -69,23 +69,23 @@ class RecurrentAttentionModel(object):
                          task_name,
                          hyperparameters, **kwargs):
         # construct patch interpretation network
+        patch_transforms = []
         if task_name == "featurelevel_ucf101":
             n_channels = 512 + 4096
-            assert patch_shape[1:] == [1, 1]
-            patch_shape = (patch_shape[0], 1)
-        patch_transforms = []
-        if patch_cnn_spec == "pretrained":
-            import pretrained
-            patch_transforms.append(pretrained.get_patch_transform(**hyperparameters))
-            shape = patch_transforms[-1].get_dim("output")
-        elif patch_cnn_spec:
-            patch_transforms.append(masonry.construct_cnn(
-                name="patch_cnn",
-                layer_specs=patch_cnn_spec,
-                input_shape=patch_shape,
-                n_channels=n_channels,
-                batch_normalize=batch_normalize_patch))
-            shape = patch_transforms[-1].get_dim("output")
+            shape = self.cropper.output_shape
+        else:
+            if patch_cnn_spec == "pretrained":
+                import pretrained
+                patch_transforms.append(pretrained.get_patch_transform(**hyperparameters))
+                shape = patch_transforms[-1].get_dim("output")
+            elif patch_cnn_spec:
+                patch_transforms.append(masonry.construct_cnn(
+                    name="patch_cnn",
+                    layer_specs=patch_cnn_spec,
+                    input_shape=patch_shape,
+                    n_channels=n_channels,
+                    batch_normalize=batch_normalize_patch))
+                shape = patch_transforms[-1].get_dim("output")
         patch_transforms.append(bricks.FeedforwardFlattener(input_shape=shape))
         if patch_mlp_spec:
             patch_transforms.append(masonry.construct_mlp(

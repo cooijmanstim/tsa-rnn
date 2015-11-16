@@ -1,4 +1,4 @@
-import os, logging, cPickle, zlib, h5py
+import os, logging, cPickle, zlib, h5py, functools
 from StringIO import StringIO
 import numpy as np
 import theano, theano.tensor as T
@@ -10,13 +10,17 @@ import transformers
 logger = logging.getLogger(__name__)
 
 max_duration = 100
-def bound_duration(sources):
+def bound_duration(sources, augment=False):
     duration = sources[0].shape[1]
-    if duration > max_duration:
+    crop_duration = duration
+    if augment:
+        crop_duration = duration / 2
+    crop_duration = min(crop_duration, max_duration)
+    if duration > crop_duration:
         sources = list(sources)
-        offset = np.random.randint(0, duration - max_duration)
+        offset = np.random.randint(0, duration - crop_duration)
         for i, source in enumerate(sources):
-            sources[i] = source[:, offset:(offset + max_duration), ...]
+            sources[i] = source[:, offset:(offset + crop_duration), ...]
     return sources
 
 class FeaturelevelUCF101Dataset(fuel.datasets.H5PYDataset):
@@ -31,7 +35,10 @@ class FeaturelevelUCF101Dataset(fuel.datasets.H5PYDataset):
             sources[i] = list(map(cPickle.load, map(StringIO, map(zlib.decompress, sources[i]))))
             # move channel axis before time axis
             sources[i] = [np.rollaxis(x, 1, 0) for x in sources[i]]
-        sources[:2] = list(zip(*list(map(bound_duration, zip(*sources[:2])))))
+        sources[:2] = list(zip(*list(map(
+            functools.partial(bound_duration,
+                              augment=self.which_sets[0] == "train"),
+            zip(*sources[:2])))))
         # so i accidentally mixed up the two when generating the dataset
         sources[0], sources[1] = sources[1], sources[0]
         # flatten the degenerate spatial dimensions on the fc features
