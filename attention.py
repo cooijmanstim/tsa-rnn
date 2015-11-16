@@ -167,6 +167,9 @@ class RecurrentAttentionModel(object):
             self.locate(scope)
         self.map_to_input_space(scope)
         scope.patch, scope.savings = self.cropper.apply(scope.x, scope.x_shape, scope.true_location, scope.true_scale)
+        graph.add_transform([scope.patch],
+                            graph.WhiteNoiseTransform("patch_std"),
+                            reason="regularization")
         scope.response = self.response_mlp.apply(
             T.concatenate([
                 self.patch_transform.apply(scope.patch),
