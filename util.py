@@ -202,3 +202,13 @@ class ExponentialDecay(SimpleExtension):
 
     def do(self, which_callback, *args):
         self.parameter.set_value(self.rate * self.parameter.get_value())
+
+# blocks -_-
+def uniqueify_names_last_resort(variables):
+    by_name = {}
+    for variable in variables:
+        by_name.setdefault(variable.name, []).append(variable)
+    return list(itertools.chain.from_iterable(
+        (variable.copy(name="%s[%i]" % (name, i))
+         for i, variable in enumerate(group))
+        for name, group in by_name.items()))

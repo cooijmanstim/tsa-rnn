@@ -38,9 +38,16 @@ def construct_monitors(algorithm, task, model, graphs, outputs,
             for name, param in model.get_parameter_dict().items()])
         step_channels.append(algorithm.total_step_norm.copy(name="total_step_norm"))
         step_channels.append(algorithm.total_gradient_norm.copy(name="total_gradient_norm"))
+
+        step_channels.extend(util.uniqueify_names_last_resort(util.dedup(
+            (var.mean().copy(name="bn_stat:%s" % util.get_path(var))
+             for var in graph.deep_ancestors([outputs["train"]["cost"]])
+             if hasattr(var.tag, "batch_normalization_brick")),
+            equal=util.equal_computations)))
+
         logger.warning("constructing training data monitor")
         extensions.append(TrainingDataMonitoring(
-            step_channels, prefix="train", after_epoch=True))
+            step_channels, prefix="iteration", after_batch=True))
 
     if "parameters" in monitor_options:
         data_independent_channels = []

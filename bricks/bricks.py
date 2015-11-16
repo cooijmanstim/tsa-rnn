@@ -7,6 +7,7 @@ import theano
 import theano.tensor as T
 
 from blocks.bricks.base import application, lazy
+from blocks.graph import add_annotation
 from blocks.roles import add_role, WEIGHT, BIAS, INITIAL_STATE, VariableRole
 from blocks.utils import shared_floatx_nans, shared_floatx_zeros
 
@@ -180,8 +181,9 @@ class BatchNormalization(bricks.Initializable, bricks.Feedforward):
         parameter_shape = [1] + [1 if broadcast else dim for dim, broadcast
                                  in zip(self.shape, self.broadcastable)]
         self.population_stats = dict(
-            (stat, shared_floatx_nans(parameter_shape,
-                                      name="population_%s" % stat))
+            (stat, self.annotated_statistic(
+                shared_floatx_nans(parameter_shape,
+                                   name="population_%s" % stat)))
             for stat in self.stats)
         self.gamma = shared_floatx_nans(parameter_shape, name='gamma')
         self.beta = shared_floatx_nans(parameter_shape, name='beta')
@@ -189,6 +191,11 @@ class BatchNormalization(bricks.Initializable, bricks.Feedforward):
         add_role(self.beta, BIAS)
         self.parameters.append(self.gamma)
         self.parameters.append(self.beta)
+
+    def annotated_statistic(self, var):
+        add_annotation(var, self)
+        var.tag.batch_normalization_brick = self
+        return var
 
     def _initialize(self):
         zero, one = initialization.Constant(0.), initialization.Constant(1.)
@@ -200,13 +207,15 @@ class BatchNormalization(bricks.Initializable, bricks.Feedforward):
     @application(inputs=["input_"], outputs=["output"])
     def apply(self, input_):
         aggregate_axes = [0] + [1 + i for i, b in enumerate(self.broadcastable) if b]
-        self.batch_stats = dict(
+        # NOTE: don't put batch_stats on self because apply may be
+        # called multiple times
+        batch_stats = dict(
             (stat, getattr(input_, stat)(axis=aggregate_axes,
                                          keepdims=True))
             for stat in self.stats)
 
         for stat, role in self.roles.items():
-            graph.add_transform([self.batch_stats[stat]],
+            graph.add_transform([batch_stats[stat]],
                                 graph.ConstantTransform(
                                     # adding zero to ensure it's a TensorType(float32, row)
                                     # just like the corresponding batch_stat, rather than a
@@ -217,16 +226,15 @@ class BatchNormalization(bricks.Initializable, bricks.Feedforward):
                                 reason="population_normalization")
 
             # make the batch statistics identifiable to get_updates() below
-            add_role(self.batch_stats[stat], self.roles[stat])
-            self.batch_stats[stat].tag.batch_normalization_brick = self
-            self.population_stats[stat].tag.batch_normalization_brick = self
+            add_role(batch_stats[stat], self.roles[stat])
+            batch_stats[stat] = self.annotated_statistic(batch_stats[stat])
 
         gamma = T.patternbroadcast(self.gamma, [True] + self.broadcastable)
         beta = T.patternbroadcast(self.beta, [True] + self.broadcastable)
         return theano.tensor.nnet.bn.batch_normalization(
             inputs=input_, gamma=gamma, beta=beta,
-            mean=self.batch_stats["mean"],
-            std=T.sqrt(self.batch_stats["var"] + self.epsilon))
+            mean=batch_stats["mean"],
+            std=T.sqrt(batch_stats["var"] + self.epsilon))
 
     @staticmethod
     def get_updates(variables):
