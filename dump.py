@@ -21,6 +21,15 @@ class PrintingTo(Printing):
             f.write("\n".join(lines))
             f.write("\n")
 
+class DumpLog(SimpleExtension):
+    def __init__(self, path, **kwargs):
+        kwargs.setdefault("after_training", True)
+        super(DumpLog, self).__init__(**kwargs)
+        self.path = path
+
+    def do(self, callback_name, *args):
+        secure_dump(self.main_loop, self.path, use_cpickle=True)
+
 class DumpGraph(SimpleExtension):
     def __init__(self, path, **kwargs):
         kwargs["after_batch"] = True

@@ -295,15 +295,16 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
     from blocks.extensions.stopping import FinishIfNoImprovementAfter
     from blocks.extensions.training import TrackTheBest
     from blocks.extensions.saveload import Checkpoint
-    from dump import DumpBest, LightCheckpoint, PrintingTo, DumpGraph
+    from dump import DumpBest, LightCheckpoint, PrintingTo, DumpGraph, DumpLog
     extensions.extend([
         TrackTheBest("valid_error_rate", "best_valid_error_rate"),
         FinishIfNoImprovementAfter("best_valid_error_rate", epochs=patience_epochs),
         FinishAfter(after_n_epochs=max_epochs),
         DumpBest("best_valid_error_rate", name+"_best.zip"),
         Checkpoint(hyperparameters["checkpoint_save_path"],
-                   on_interrupt=False, every_n_epochs=5,
-                   use_cpickle=True, save_separately=["log"]),
+                   on_interrupt=False, every_n_epochs=10,
+                   use_cpickle=True),
+        DumpLog("log.pkl", after_epoch=True),
         ProgressBar(),
         Timing(),
         Printing(), PrintingTo(name+"_log"),
