@@ -1,5 +1,6 @@
 import os, logging, yaml
 from collections import OrderedDict
+import numpy as np
 import theano
 import theano.tensor as T
 from blocks.graph import ComputationGraph
@@ -324,6 +325,8 @@ def construct_main_loop(name, task_name, patch_shape, batch_size,
     return main_loop
 
 if __name__ == "__main__":
+    np.random.seed(1)
+
     logging.basicConfig()
     logger = logging.getLogger(__name__)
 
