@@ -32,8 +32,8 @@ class RecurrentAttentionModel(object):
         self.children = []
 
         self.rnn = bricks.RecurrentStack(
-            [bricks.GatedRecurrent(activation=bricks.Tanh(), dim=hidden_dim),
-             bricks.GatedRecurrent(activation=bricks.Tanh(), dim=hidden_dim)],
+            [bricks.LSTM(activation=bricks.Tanh(), dim=hidden_dim),
+             bricks.LSTM(activation=bricks.Tanh(), dim=hidden_dim)],
             weights_init=initialization.NormalizedInitialization(
                 initialization.IsotropicGaussian()),
             biases_init=initialization.Constant(0))
@@ -48,7 +48,7 @@ class RecurrentAttentionModel(object):
         self.embedder = bricks.Linear(
             name="embedder",
             input_dim=self.response_mlp.output_dim,
-            output_dim=self.rnn.get_dim("inputs") + self.rnn.get_dim("gate_inputs"),
+            output_dim=self.rnn.get_dim("inputs"),
             use_bias=True,
             weights_init=initialization.Orthogonal(),
             biases_init=initialization.Constant(0))
@@ -58,8 +58,14 @@ class RecurrentAttentionModel(object):
     def initialize(self):
         for child in self.children:
             child.initialize()
-        for gru in self.rnn.transitions:
-            initialization.Identity().initialize(gru.state_to_state, gru.rng)
+        # identity initialization for LSTM
+        identity = initialization.Identity()
+        for lstm in self.rnn.transitions:
+            W = lstm.W_state.get_value()
+            n = lstm.get_dim("states")
+            for i in xrange(4):
+                W[:, (i * n):((i + 1) * n)] = 0.95 * identity.generate(lstm.rng, (W.shape[0], n))
+            lstm.W_state.set_value(W)
 
     @util.checkargs
     def construct_merger(self, n_spatial_dims, n_channels,
@@ -180,10 +186,8 @@ class RecurrentAttentionModel(object):
                     ], axis=1)),
             ], axis=1))
         embedding = self.embedder.apply(scope.response)
-        hidden_dim = self.rnn.get_dim("inputs")
         scope.rnn_inputs = dict(
-            inputs=embedding[:, :hidden_dim],
-            gate_inputs=embedding[:, hidden_dim:],
+            inputs=embedding,
             **scope.previous_states)
         scope.rnn_outputs = self.rnn.apply(iterate=False, as_dict=True,
                                            **scope.rnn_inputs)
