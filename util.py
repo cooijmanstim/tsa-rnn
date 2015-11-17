@@ -167,6 +167,7 @@ class Scope(object):
         return self._dikt.keys()
 
 def the(xs):
+    xs = list(xs)
     assert len(xs) == 1
     return xs[0]
 

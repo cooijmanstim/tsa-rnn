@@ -9,6 +9,8 @@ import transformers
 
 logger = logging.getLogger(__name__)
 
+np.random.seed(1)
+
 max_duration = 100
 def bound_duration(sources, augment=False):
     duration = sources[0].shape[1]
@@ -18,9 +20,11 @@ def bound_duration(sources, augment=False):
     crop_duration = min(crop_duration, max_duration)
     if duration > crop_duration:
         sources = list(sources)
-        offset = np.random.randint(0, duration - crop_duration)
+        # take a random chronological subsample of frames
+        frames_kept = np.random.choice(duration, crop_duration, replace=False)
+        frames_kept.sort()
         for i, source in enumerate(sources):
-            sources[i] = source[:, offset:(offset + crop_duration), ...]
+            sources[i] = source[:, frames_kept, ...]
     return sources
 
 class FeaturelevelUCF101Dataset(fuel.datasets.H5PYDataset):
