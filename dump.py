@@ -28,7 +28,7 @@ class DumpLog(SimpleExtension):
         self.path = path
 
     def do(self, callback_name, *args):
-        secure_dump(self.main_loop, self.path, use_cpickle=True)
+        secure_dump(self.main_loop.log, self.path, use_cpickle=True)
 
 class DumpGraph(SimpleExtension):
     def __init__(self, path, **kwargs):
